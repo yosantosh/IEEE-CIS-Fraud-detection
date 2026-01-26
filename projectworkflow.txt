@@ -1,0 +1,12 @@
+---------------------- setting up project structure ------------
+
+1. create a virtual environment named 'atlas' : conda create -n atlas python=3.10
+2. Activate the atlas env : conda activate atlas
+3. pip install cookiecutter : to build project structure, the have multiple templetes on github i guess
+   so it just create files and build project struture.
+4. "cookiecutter -c v1 https://github.com/drivendata/cookiecutter-data-science" : to copy the templete (skip aws things we will setup this manually)
+5. cut all files from newly created and past on root folder
+6. rename src.models to src.model becasue we already have model in root so its like just to make the mind clear.
+7. git push origin main
+
+
