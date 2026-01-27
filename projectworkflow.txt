@@ -26,3 +26,34 @@
 
 17. git should track the dvc data id or pointers so : "git add .dvc .dvcignore"  && "git commit -m "Initialize DVC" && "git push origain main"
 
+
+
+
+-------------------------------- Building src components--------------------------
+
+1. Logging ------------------> 
+   
+   1.Write logger module : ok so we need a logger module so that we can save the logs for important steps in the whole project. 
+   so to make the module(will be able to import on different folders):
+
+   2. ---> create logger foler inside the src directory, then create __init__.py and write the code in this file
+   3.---> best practice dont run the logged() in the last in __init__.py instead run the module where you are exporting it
+
+   from src import logger
+   # Explicitly start it here
+   logger.setup_logging() 
+
+   logger.info("Now the logs start.")
+
+2. local packages ------------>
+   
+   --install packages listed in requirement.txt, also
+   --add e .  in the same file so that it will also install the local packages
+   --install: pip install -r requirement.txt     or       "pip install -e ." to install local package  
+
+
+3. 
+
+
+
+
