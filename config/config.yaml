@@ -1,0 +1,73 @@
+# IEEE-CIS Fraud Detection Pipeline Configuration
+# ================================================
+
+# --------------------------------------------------------
+# Data Ingestion Settings
+# --------------------------------------------------------
+data_ingestion:
+  # Source type: "s3" or "local"
+  source_type: "s3"
+  
+  # S3 Configuration
+  s3:
+    bucket_name: "mlops-capstone-project-final"
+    transaction_key: "train_transaction.csv"
+    identity_key: "train_identity.csv"
+    region: "us-east-1"
+  
+  # Local Configuration (alternative)
+  local:
+    transaction_path: "data/train_transaction.csv"
+    identity_path: "data/train_identity.csv"
+  
+  # Data split settings
+  test_size: 0.2
+  random_state: 42
+  
+  # Target column
+  target_column: "isFraud"
+  merge_on: "TransactionID"
+
+# --------------------------------------------------------
+# Artifact Paths
+# --------------------------------------------------------
+artifacts:
+  data:
+    raw_dir: "artifacts/data/raw"
+    processed_dir: "artifacts/data/processed"
+    train_path: "artifacts/data/processed/train.csv"
+    test_path: "artifacts/data/processed/test.csv"
+  
+  features:
+    dir: "artifacts/features"
+  
+  models:
+    dir: "artifacts/models"
+  
+  metrics:
+    dir: "artifacts/metrics"
+
+# --------------------------------------------------------
+# Schema Path
+# --------------------------------------------------------
+schema:
+  path: "src/constants/schema.yaml"
+
+# --------------------------------------------------------
+# Model Training (placeholder for future use)
+# --------------------------------------------------------
+model_training:
+  models:
+    - XGBClassifier
+    - LGBMClassifier
+    - CatBoostClassifier
+  cross_validation:
+    n_splits: 5
+    shuffle: true
+
+# --------------------------------------------------------
+# MLflow Settings
+# --------------------------------------------------------
+mlflow:
+  tracking_uri: "https://dagshub.com/santosh4thmarch/IEEE-CIS-Fraud-detection.mlflow"
+  experiment_name: "IEEE-CIS-Fraud-Detection"

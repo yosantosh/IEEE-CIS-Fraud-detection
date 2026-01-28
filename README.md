@@ -231,24 +231,257 @@ The V columns (V1-V339) are Vesta's proprietary features. We group correlated co
 
 ## 🚀 How to Run
 
+### Prerequisites
+
 1. **Clone the repository**
 ```bash
-git clone https://github.com/yourusername/IEEE-CIS-Fraud-detection.git
+git clone https://github.com/santosh4thmarch/IEEE-CIS-Fraud-detection.git
 cd IEEE-CIS-Fraud-detection
 ```
 
-2. **Install dependencies**
+2. **Create and activate conda environment**
 ```bash
-pip install numpy pandas matplotlib seaborn scikit-learn lightgbm tldextract
+conda create -n mlops python=3.13 -y
+conda activate mlops
 ```
 
-3. **Download the dataset**
-   - Go to [Kaggle Competition](https://www.kaggle.com/competitions/ieee-fraud-detection/data)
-   - Download and place files in `/kaggle/input/ieee-fraud-detection/`
+3. **Install dependencies**
+```bash
+pip install -r requirements.txt
+pip install dvc python-dotenv
+```
 
-4. **Run the notebook**
-   - Open `eda-ieee-cis-fraud-detection.ipynb` in Jupyter/Kaggle
-   - Execute all cells
+4. **Set up AWS credentials** (for S3 data access)
+```bash
+# Copy the example env file
+cp .env.example .env
+
+# Edit .env with your actual credentials
+AWS_ACCESS_KEY_ID=your_access_key
+AWS_SECRET_ACCESS_KEY=your_secret_key
+AWS_DEFAULT_REGION=us-east-1
+```
+
+---
+
+## 🔄 DVC Pipeline
+
+This project uses **DVC (Data Version Control)** for reproducible ML pipelines.
+
+### What is DVC?
+
+DVC is a tool that helps manage:
+- **Data versioning**: Track large files without storing them in Git
+- **Pipeline automation**: Define and run ML pipelines with dependencies
+- **Reproducibility**: Recreate exact results from any previous run
+
+### Installing DVC
+
+```bash
+# Install DVC in your conda environment
+pip install dvc
+
+# Initialize DVC in the project (already done)
+dvc init
+```
+
+### Pipeline Configuration (`dvc.yaml`)
+
+The pipeline is defined in `dvc.yaml`:
+
+```yaml
+stages:
+  data_ingestion:
+    cmd: python -m src.data.data_ingestion --source s3
+    deps:
+      - src/data/data_ingestion.py
+      - src/utils/fetch_data.py
+      - config/config.yaml
+    outs:
+      - artifacts/data/processed/train.csv
+      - artifacts/data/processed/test.csv
+    params:
+      - config/config.yaml:
+          - data_ingestion.test_size
+          - data_ingestion.random_state
+```
+
+**Key concepts:**
+- `cmd`: The command to run for this stage
+- `deps`: Files this stage depends on (if changed, stage reruns)
+- `outs`: Output files produced by this stage
+- `params`: Config parameters to track for changes
+
+### Running the Pipeline
+
+```bash
+# Activate environment
+conda activate mlops
+
+# Run the entire pipeline
+dvc repro
+
+# Run a specific stage
+dvc repro data_ingestion
+
+# View pipeline structure
+dvc dag
+
+# Check what stages need to be run
+dvc status
+```
+
+### DVC Commands Cheat Sheet
+
+| Command | Description |
+|---------|-------------|
+| `dvc repro` | Run the entire pipeline |
+| `dvc repro <stage>` | Run a specific stage and its dependencies |
+| `dvc dag` | Visualize pipeline as a DAG |
+| `dvc status` | Show which stages are outdated |
+| `dvc push` | Push tracked data to remote storage |
+| `dvc pull` | Pull tracked data from remote storage |
+
+---
+
+## 📦 Data Ingestion Component
+
+### Overview
+
+The **Data Ingestion** component is the first stage of the ML pipeline. It handles:
+
+1. **Fetching data** from S3 (or local files)
+2. **Merging** transaction and identity datasets
+3. **Splitting** into train/test sets
+4. **Saving** processed data to disk
+
+### Component Files
+
+```
+IEEE-CIS-Fraud-detection/
+├── src/
+│   ├── data/
+│   │   └── data_ingestion.py    # Main data ingestion class
+│   ├── utils/
+│   │   ├── fetch_data.py        # S3, MongoDB, BigQuery, PostgreSQL, Local fetchers
+│   │   └── __init__.py          # YAML read/write utilities
+│   ├── logger/
+│   │   └── __init__.py          # Logging configuration
+│   └── exception/
+│       └── __init__.py          # Custom exception classes
+├── config/
+│   └── config.yaml              # Pipeline configuration
+├── .env                         # AWS credentials (gitignored)
+├── .env.example                 # Credential template
+└── dvc.yaml                     # DVC pipeline definition
+```
+
+### File Descriptions
+
+| File | Purpose |
+|------|---------|
+| `src/data/data_ingestion.py` | Main orchestrator - fetches, merges, splits, and saves data |
+| `src/utils/fetch_data.py` | Data fetching adapters for multiple sources (S3, MongoDB, BigQuery, PostgreSQL, Local) |
+| `src/logger/__init__.py` | Centralized logging with rotating file handler |
+| `src/exception/__init__.py` | Custom exceptions for each pipeline stage |
+| `config/config.yaml` | All pipeline parameters (bucket names, paths, split ratios) |
+| `.env` | Sensitive credentials (AWS keys) - **never commit this!** |
+| `dvc.yaml` | Pipeline stage definitions for DVC |
+
+### Data Flow
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                     DATA INGESTION PIPELINE                      │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  ┌──────────────┐    ┌──────────────┐                           │
+│  │     S3       │    │   .env       │                           │
+│  │   Bucket     │◄───│ (credentials)│                           │
+│  └──────┬───────┘    └──────────────┘                           │
+│         │                                                        │
+│         ▼                                                        │
+│  ┌──────────────────────────────────┐                           │
+│  │ fetch_data.py                    │                           │
+│  │ - fetch_data_from_S3()           │                           │
+│  │ - fetch_data_from_local()        │                           │
+│  └──────────────┬───────────────────┘                           │
+│                 │                                                │
+│         ┌───────┴───────┐                                       │
+│         │               │                                        │
+│         ▼               ▼                                        │
+│  ┌─────────────┐ ┌─────────────┐                                │
+│  │ Transaction │ │  Identity   │                                │
+│  │   (590K)    │ │   (144K)    │                                │
+│  └──────┬──────┘ └──────┬──────┘                                │
+│         │               │                                        │
+│         └───────┬───────┘                                       │
+│                 │ MERGE (LEFT JOIN on TransactionID)            │
+│                 ▼                                                │
+│         ┌─────────────┐                                         │
+│         │   Merged    │                                         │
+│         │ (590K×434)  │                                         │
+│         └──────┬──────┘                                         │
+│                │ TRAIN/TEST SPLIT (80/20, stratified)           │
+│         ┌──────┴──────┐                                         │
+│         │             │                                          │
+│         ▼             ▼                                          │
+│  ┌─────────────┐ ┌─────────────┐                                │
+│  │  train.csv  │ │  test.csv   │                                │
+│  │  (472K)     │ │  (118K)     │                                │
+│  └─────────────┘ └─────────────┘                                │
+│                                                                  │
+│  📁 Output: artifacts/data/processed/                           │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Running Data Ingestion
+
+**Option 1: Via DVC (Recommended)**
+```bash
+dvc repro data_ingestion
+```
+
+**Option 2: Direct Python**
+```bash
+# From S3
+python -m src.data.data_ingestion --source s3
+
+# From local files
+python -m src.data.data_ingestion --source local \
+    --transaction-path data/train_transaction.csv \
+    --identity-path data/train_identity.csv
+```
+
+### Configuration (`config/config.yaml`)
+
+```yaml
+data_ingestion:
+  source_type: "s3"
+  
+  s3:
+    bucket_name: "mlops-capstone-project-final"
+    transaction_key: "train_transaction.csv"
+    identity_key: "train_identity.csv"
+    region: "us-east-1"
+  
+  test_size: 0.2
+  random_state: 42
+  target_column: "isFraud"
+  merge_on: "TransactionID"
+```
+
+### Output Artifacts
+
+After running data ingestion:
+
+```
+artifacts/
+└── data/
+    └── processed/
+        ├── train.csv    # Training data (80%)
+        └── test.csv     # Test data (20%)
+```
 
 ---
 
@@ -256,10 +489,49 @@ pip install numpy pandas matplotlib seaborn scikit-learn lightgbm tldextract
 
 ```
 IEEE-CIS-Fraud-detection/
-├── eda-ieee-cis-fraud-detection.ipynb   # Main EDA & Feature Engineering notebook
-├── README.md                             # This documentation
-├── LICENSE                               # MIT License
-└── .gitignore                           # Git ignore rules
+│
+├── 📊 Data & Notebooks
+│   ├── notebooks/                   # Jupyter notebooks for EDA
+│   └── data/                        # Local data files (optional)
+│
+├── 🔧 Source Code
+│   ├── src/
+│   │   ├── data/
+│   │   │   └── data_ingestion.py    # Data ingestion component
+│   │   ├── features/                # Feature engineering
+│   │   ├── models/                  # Model training & evaluation
+│   │   ├── utils/
+│   │   │   ├── fetch_data.py        # Multi-source data fetchers
+│   │   │   └── __init__.py          # YAML utilities
+│   │   ├── logger/                  # Logging setup
+│   │   ├── exception/               # Custom exceptions
+│   │   └── constants/
+│   │       └── schema.yaml          # Data schema definitions
+│   │
+├── ⚙️ Configuration
+│   ├── config/
+│   │   └── config.yaml              # Pipeline parameters
+│   ├── .env                         # Credentials (gitignored)
+│   ├── .env.example                 # Credential template
+│   └── dvc.yaml                     # DVC pipeline definition
+│
+├── 📦 Artifacts (generated)
+│   └── artifacts/
+│       ├── data/
+│       │   ├── raw/                 # Raw merged data
+│       │   └── processed/           # Train/test splits
+│       ├── features/                # Engineered features
+│       ├── models/                  # Trained models
+│       └── metrics/                 # Evaluation metrics
+│
+├── 📝 Documentation
+│   ├── README.md                    # This file
+│   └── LICENSE                      # MIT License
+│
+└── 🔒 Git/DVC
+    ├── .gitignore                   # Git ignore rules
+    ├── .dvc/                        # DVC internals
+    └── dvc.lock                     # DVC lock file
 ```
 
 ---

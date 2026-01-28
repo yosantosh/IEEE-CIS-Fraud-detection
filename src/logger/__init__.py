@@ -23,17 +23,22 @@ log_dir_path = root_dir / LOG_DIR                               #create log path
 # print(log_dir_path)
 
 
-def logged():
-    "Logging module with RotatingFileHandler and consolehandler"
+def setup_logging():
+    """Logging module with RotatingFileHandler and consolehandler"""
 
-    #creating logger object 
-    logger = logging.getLogger()
+    # Creating logger object with a specific name (avoids duplicate handlers)
+    logger = logging.getLogger("IEEE_CIS_Fraud")
+    
+    # Prevent adding handlers multiple times if module is imported again
+    if logger.handlers:
+        return logger
+    
     logger.setLevel(logging.DEBUG)
 
-    # logger formattor
+    # Logger formatter
     # Format: Time | Level | File:Line | Message
     formatter = logging.Formatter(
-    "[%(asctime)s] | %(levelname)s | %(filename)s:%(lineno)d | %(message)s"
+        "[%(asctime)s] | %(levelname)s | %(filename)s:%(lineno)d | %(message)s"
     )
 
     # Create directories if they don't exist
@@ -43,19 +48,27 @@ def logged():
     log_file_path = log_dir_path / LOG_FILE
 
     # Rotating file handler to delete old logs and save the disk space
-    file_handler = RotatingFileHandler(log_file_path, maxBytes=MAX_LOG_SIZE,backupCount=BACKUP_COUNT,encoding='utf-8')
+    file_handler = RotatingFileHandler(
+        log_file_path, 
+        maxBytes=MAX_LOG_SIZE, 
+        backupCount=BACKUP_COUNT, 
+        encoding='utf-8'
+    )
     file_handler.setFormatter(formatter)
     file_handler.setLevel(logging.INFO)
 
-    # console handler
+    # Console handler
     console_handler = logging.StreamHandler(sys.stdout)
     console_handler.setFormatter(formatter)
     console_handler.setLevel(logging.INFO)
 
-    #adding handlers into logger object
+    # Adding handlers into logger object
     logger.addHandler(file_handler)
     logger.addHandler(console_handler)
 
+    return logger
 
-# call logged func here : so that when you imort this it will autorun without explicitely run it there using looged.setup_logging()
-logged()                
+
+# Initialize logger when module is imported
+# Other modules should: from src.logger import logger
+logger = setup_logging()

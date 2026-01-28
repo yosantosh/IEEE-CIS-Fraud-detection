@@ -52,7 +52,13 @@
    --install: pip install -r requirement.txt     or       "pip install -e ." to install local package  
 
 
-3. 
+3. params.yaml & config entity & utils.common.py-------------->  : 
+   1. Create src.constant.params.yaml to import constant variable names 
+   2. src.entity.config_entity.py to store configuration for each components
+   3. src.utils.common.py to store common functions
+
+
+
 
 
 

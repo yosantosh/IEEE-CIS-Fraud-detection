@@ -1,0 +1,74 @@
+# DVC Pipeline Configuration for IEEE-CIS Fraud Detection
+# ========================================================
+# Run the pipeline: dvc repro
+# Run specific stage: dvc repro data_ingestion
+# Visualize pipeline: dvc dag
+
+stages:
+  # --------------------------------------------------------
+  # Stage 1: Data Ingestion
+  # --------------------------------------------------------
+  data_ingestion:
+    cmd: python -m src.data.data_ingestion --source s3
+    deps:
+      - src/data/data_ingestion.py
+      - src/utils/fetch_data.py
+      - config/config.yaml
+    outs:
+      - artifacts/data/processed/train.csv
+      - artifacts/data/processed/test.csv
+    params:
+      - config/config.yaml:
+          - data_ingestion.test_size
+          - data_ingestion.random_state
+
+  # --------------------------------------------------------
+  # Stage 2: Data Transformation (placeholder)
+  # --------------------------------------------------------
+  # data_transformation:
+  #   cmd: python -m src.data.data_transformation
+  #   deps:
+  #     - src/data/data_transformation.py
+  #     - artifacts/data/processed/train.csv
+  #     - artifacts/data/processed/test.csv
+  #   outs:
+  #     - artifacts/data/transformed/train_transformed.csv
+  #     - artifacts/data/transformed/test_transformed.csv
+
+  # --------------------------------------------------------
+  # Stage 3: Feature Engineering (placeholder)
+  # --------------------------------------------------------
+  # feature_engineering:
+  #   cmd: python -m src.features.feature_engineering
+  #   deps:
+  #     - src/features/feature_engineering.py
+  #     - artifacts/data/transformed/train_transformed.csv
+  #   outs:
+  #     - artifacts/features/train_features.csv
+
+  # --------------------------------------------------------
+  # Stage 4: Model Training (placeholder)
+  # --------------------------------------------------------
+  # model_training:
+  #   cmd: python -m src.models.train
+  #   deps:
+  #     - src/models/train.py
+  #     - artifacts/features/train_features.csv
+  #   outs:
+  #     - artifacts/models/model.pkl
+  #   metrics:
+  #     - artifacts/metrics/metrics.json:
+  #         cache: false
+
+  # --------------------------------------------------------
+  # Stage 5: Model Evaluation (placeholder)
+  # --------------------------------------------------------
+  # model_evaluation:
+  #   cmd: python -m src.models.evaluate
+  #   deps:
+  #     - src/models/evaluate.py
+  #     - artifacts/models/model.pkl
+  #     - artifacts/features/test_features.csv
+  #   metrics:
+  #     - artifacts/metrics/evaluation.json:
+  #         cache: false
