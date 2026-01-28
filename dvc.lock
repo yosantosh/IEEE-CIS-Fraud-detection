@@ -1,0 +1,45 @@
+schema: '2.0'
+stages:
+  data_ingestion:
+    cmd: python -m src.components.data_ingestion --source s3
+    deps:
+    - path: config/config.yaml
+      hash: md5
+      md5: 0e1f128ecbd0a61fc70464255dd28859
+      size: 2019
+    - path: src/components/data_ingestion.py
+      hash: md5
+      md5: e943701f9c9dd203ace2a99b619de2e9
+      size: 8872
+    - path: src/utils/fetch_data.py
+      hash: md5
+      md5: d3699e6665a72f8fa4c0b89cc98a1b08
+      size: 29634
+    params:
+      config/config.yaml:
+        data_ingestion.source_type: s3
+    outs:
+    - path: artifacts/data/raw/raw_data.csv
+      hash: md5
+      md5: 74ee962ad47303cce468df1c0926354a
+      size: 1242289
+  data_transformation_Feature_engineering:
+    cmd: python -m src.components.data_FE_transformation
+    deps:
+    - path: artifacts/data/raw/raw_data.csv
+      hash: md5
+      md5: 74ee962ad47303cce468df1c0926354a
+      size: 1242289
+    - path: src/components/data_FE_transformation.py
+      hash: md5
+      md5: 483224226932fd0a005ddc2a911d9a67
+      size: 38873
+    - path: src/components/data_ingestion.py
+      hash: md5
+      md5: e943701f9c9dd203ace2a99b619de2e9
+      size: 8872
+    outs:
+    - path: artifacts/data/transformed/Train_transformed.csv
+      hash: md5
+      md5: b35ab5693ed364fed08095024a95ee56
+      size: 2479683

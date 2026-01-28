@@ -9,31 +9,29 @@ stages:
   # Stage 1: Data Ingestion
   # --------------------------------------------------------
   data_ingestion:
-    cmd: python -m src.data.data_ingestion --source s3
+    cmd: python -m src.components.data_ingestion --source s3
     deps:
-      - src/data/data_ingestion.py
+      - src/components/data_ingestion.py
       - src/utils/fetch_data.py
       - config/config.yaml
     outs:
-      - artifacts/data/processed/train.csv
-      - artifacts/data/processed/test.csv
+      - artifacts/data/raw/raw_data.csv
+
     params:
       - config/config.yaml:
-          - data_ingestion.test_size
-          - data_ingestion.random_state
+          - data_ingestion.source_type
 
   # --------------------------------------------------------
   # Stage 2: Data Transformation (placeholder)
   # --------------------------------------------------------
-  # data_transformation:
-  #   cmd: python -m src.data.data_transformation
-  #   deps:
-  #     - src/data/data_transformation.py
-  #     - artifacts/data/processed/train.csv
-  #     - artifacts/data/processed/test.csv
-  #   outs:
-  #     - artifacts/data/transformed/train_transformed.csv
-  #     - artifacts/data/transformed/test_transformed.csv
+  data_transformation_Feature_engineering:
+    cmd: python -m src.components.data_FE_transformation
+    deps:
+      - src/components/data_FE_transformation.py
+      - src/components/data_ingestion.py
+      - artifacts/data/raw/raw_data.csv
+    outs:
+      - artifacts/data/transformed/Train_transformed.csv
 
   # --------------------------------------------------------
   # Stage 3: Feature Engineering (placeholder)

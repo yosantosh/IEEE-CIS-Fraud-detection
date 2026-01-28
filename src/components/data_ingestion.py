@@ -33,12 +33,11 @@ class DataIngestionConfig:
     # Paths
     raw_data_dir: str = "artifacts/data/raw"
     processed_data_dir: str = "artifacts/data/processed"
-    train_path: str = "artifacts/data/processed/train.csv"
-    test_path: str = "artifacts/data/processed/test.csv"
+    raw_data_path: str = "artifacts/data/raw/raw_data.csv"
     
-    # Split settings
-    test_size: float = 0.2
-    random_state: int = 42
+    # Row limit for reading data (None = read all rows, set to int for sampling)
+    # Useful for development/testing with large datasets
+    nrows: Optional[int] = 1000  # e.g., 10000 for quick testing, None for full dataset
     
     # S3 settings (from environment variables)
     bucket_name: str = os.getenv("S3_BUCKET_NAME", "mlops-capstone-project-final")
@@ -76,6 +75,9 @@ class DataIngestion:
         """Fetch transaction and identity data from S3."""
         logger.info("Fetching data from S3...")
         
+        if self.config.nrows:
+            logger.info(f"Reading only {self.config.nrows} rows (nrows limit set)")
+        
         # AWS credentials from environment
         aws_creds = {
             "aws_access_key_id": os.getenv("AWS_ACCESS_KEY_ID"),
@@ -89,6 +91,7 @@ class DataIngestion:
             bucket_name=self.config.bucket_name,
             object_key=self.config.transaction_key,
             file_format="csv",
+            nrows=self.config.nrows,  # Limit rows if specified
             **aws_creds
         )
         logger.info(f"Transaction data: {df_transaction.shape}")
@@ -99,6 +102,7 @@ class DataIngestion:
             bucket_name=self.config.bucket_name,
             object_key=self.config.identity_key,
             file_format="csv",
+            # Note: Don't limit identity rows - we need all to match transactions
             **aws_creds
         )
         logger.info(f"Identity data: {df_identity.shape}")
@@ -109,15 +113,20 @@ class DataIngestion:
         """Fetch transaction and identity data from local files."""
         logger.info("Fetching data from local files...")
         
+        if self.config.nrows:
+            logger.info(f"Reading only {self.config.nrows} rows (nrows limit set)")
+        
         df_transaction = Fetch_data.fetch_data_from_local(
             file_path=transaction_path,
-            file_format="csv"
+            file_format="csv",
+            nrows=self.config.nrows  # Limit rows if specified
         )
         logger.info(f"Transaction data: {df_transaction.shape}")
         
         df_identity = Fetch_data.fetch_data_from_local(
             file_path=identity_path,
             file_format="csv"
+            # Note: Don't limit identity rows - we need all to match transactions
         )
         logger.info(f"Identity data: {df_identity.shape}")
         
@@ -136,27 +145,6 @@ class DataIngestion:
         logger.info(f"Merged data shape: {merged_df.shape}")
         return merged_df
 
-    def split_and_save(self, df: pd.DataFrame) -> Tuple[str, str]:
-        """Split data into train/test and save to disk."""
-        logger.info(f"Splitting data (test_size={self.config.test_size})...")
-        
-        train_df, test_df = train_test_split(
-            df,
-            test_size=self.config.test_size,
-            random_state=self.config.random_state,
-            stratify=df['isFraud']
-        )
-        
-        logger.info(f"Train: {train_df.shape}, Test: {test_df.shape}")
-        
-        # Save
-        logger.info(f"Saving train data to {self.config.train_path}")
-        train_df.to_csv(self.config.train_path, index=False)
-        
-        logger.info(f"Saving test data to {self.config.test_path}")
-        test_df.to_csv(self.config.test_path, index=False)
-        
-        return self.config.train_path, self.config.test_path
 
     def run(self, source: str = "s3", **kwargs) -> Tuple[str, str]:
         """
@@ -187,17 +175,13 @@ class DataIngestion:
             
             # Step 2: Merge data
             merged_df = self.merge_data(df_transaction, df_identity)
+            merged_df.to_csv(self.config.raw_data_path, index=False)
             
-            # Step 3: Split and save
-            train_path, test_path = self.split_and_save(merged_df)
-            
+            logger.info(f"DATA HAS BEEN SAVED AT {self.config.raw_data_path}")
             logger.info("=" * 60)
             logger.info("DATA INGESTION COMPLETED SUCCESSFULLY")
-            logger.info(f"Train: {train_path}")
-            logger.info(f"Test: {test_path}")
             logger.info("=" * 60)
             
-            return train_path, test_path
             
         except Exception as e:
             logger.error(f"Data ingestion failed: {str(e)}")
@@ -223,11 +207,21 @@ def main():
                         help="Local path to transaction data")
     parser.add_argument("--identity-path", type=str, default="data/train_identity.csv",
                         help="Local path to identity data")
+    parser.add_argument("--nrows", type=int, default=None,
+                        help="Number of rows to read (None = all rows). Useful for testing.")
     
     args = parser.parse_args()
     
+    # Create config - use CLI nrows if provided, otherwise use class default (10000)
+    if args.nrows is not None:
+        config = DataIngestionConfig(nrows=args.nrows)
+        logger.info(f"Using CLI-specified nrows: {args.nrows}")
+    else:
+        config = DataIngestionConfig()  # Uses default nrows=10000
+        logger.info(f"Using default nrows: {config.nrows}")
+    
     # Run pipeline
-    ingestion = DataIngestion()
+    ingestion = DataIngestion(config)
     
     if args.source == "local":
         ingestion.run(

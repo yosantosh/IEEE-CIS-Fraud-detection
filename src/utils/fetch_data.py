@@ -111,19 +111,30 @@ class Fetch_data:
             
             # Get the object from S3
             response = s3_client.get_object(Bucket=bucket_name, Key=object_key)
-            data = response['Body'].read()
             
-            # Read data based on file format
-            if file_format.lower() == "csv":
-                df = pd.read_csv(BytesIO(data), **read_kwargs)
-            elif file_format.lower() == "parquet":
-                df = pd.read_parquet(BytesIO(data), **read_kwargs)
-            elif file_format.lower() == "json":
-                df = pd.read_json(BytesIO(data), **read_kwargs)
-            elif file_format.lower() in ["excel", "xlsx", "xls"]:
-                df = pd.read_excel(BytesIO(data), **read_kwargs)
+            # For CSV with nrows, stream directly to pandas to avoid downloading entire file
+            # This is critical for large datasets where we only need a sample
+            nrows = read_kwargs.get('nrows')
+            if file_format.lower() == "csv" and nrows is not None:
+                logger.info(f"Streaming CSV with nrows={nrows} (NOT downloading full file)")
+                # Use the streaming body directly - pandas will stop reading after nrows
+                df = pd.read_csv(response['Body'], **read_kwargs)
             else:
-                raise ValueError(f"Unsupported file format: {file_format}")
+                # For other formats or full reads, download entire file first
+                logger.info("Downloading full file from S3...")
+                data = response['Body'].read()
+                
+                # Read data based on file format
+                if file_format.lower() == "csv":
+                    df = pd.read_csv(BytesIO(data), **read_kwargs)
+                elif file_format.lower() == "parquet":
+                    df = pd.read_parquet(BytesIO(data), **read_kwargs)
+                elif file_format.lower() == "json":
+                    df = pd.read_json(BytesIO(data), **read_kwargs)
+                elif file_format.lower() in ["excel", "xlsx", "xls"]:
+                    df = pd.read_excel(BytesIO(data), **read_kwargs)
+                else:
+                    raise ValueError(f"Unsupported file format: {file_format}")
             
             logger.info(f"Successfully fetched {len(df)} rows from S3")
             return df

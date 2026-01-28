@@ -264,6 +264,62 @@ AWS_DEFAULT_REGION=us-east-1
 
 ---
 
+## 🔐 AWS Credentials Management
+
+### Understanding the Two Files
+
+| File | Purpose | Contains Secrets? | Commit to Git? |
+|------|---------|-------------------|----------------|
+| **`.env`** | Your **actual** AWS credentials | ✅ YES | ❌ **NEVER** (gitignored) |
+| **`.env.example`** | Template showing required variables | ❌ NO (placeholders only) | ✅ YES |
+
+### How Credentials Are Loaded
+
+This project uses **`python-dotenv`** to automatically load credentials. Here's the flow:
+
+```python
+# In data_ingestion.py
+from dotenv import load_dotenv
+
+load_dotenv()  # ← Reads .env file and loads into environment
+
+# Then accessed via os.getenv()
+aws_creds = {
+    "aws_access_key_id": os.getenv("AWS_ACCESS_KEY_ID"),
+    "aws_secret_access_key": os.getenv("AWS_SECRET_ACCESS_KEY"),
+    "aws_region": os.getenv("AWS_DEFAULT_REGION")
+}
+```
+
+### Key Points
+
+1. **You DON'T need to manually `export` environment variables**
+   - Just save credentials in `.env` file
+   - `load_dotenv()` automatically loads them into the process
+
+2. **Your `.env` file should look like:**
+   ```bash
+   AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE
+   AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
+   AWS_DEFAULT_REGION=us-east-1
+   ```
+
+3. **Security Best Practices:**
+   - ✅ `.env` is already in `.gitignore`
+   - ✅ Never commit credentials to Git
+   - ✅ Use `.env.example` to show others what variables are needed
+   - ✅ Rotate credentials if accidentally exposed
+
+### Getting AWS Credentials
+
+1. Go to [AWS Console](https://console.aws.amazon.com)
+2. Navigate to **IAM → Users → Your User → Security Credentials**
+3. Click **Create Access Key**
+4. Download and save securely
+5. Copy to your `.env` file
+
+
+
 ## 🔄 DVC Pipeline
 
 This project uses **DVC (Data Version Control)** for reproducible ML pipelines.
