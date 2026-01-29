@@ -84,7 +84,7 @@ class Read_write_yaml_schema:
         print(f"Schema '{schema_name}' has been saved/updated in {schema_yaml_filepath}")
 
     @staticmethod
-    def compare_schema(df: pd.DataFrame, schema_name: str, schema_yaml_filepath: str, strict: bool = False):
+    def compare_schema(df: pd.DataFrame, schema_name: str, schema_yaml_filepath: str, strict: bool = True):
         """
         Compare DataFrame schema against schema stored in schema.yaml.
         
@@ -317,6 +317,233 @@ def compare_schema_for_model_training(df: pd.DataFrame, schema_name: str, schema
     return result
 
 
+
+# ============================================================================
+# S3 MODEL UPLOADER - CUSTOM S3 UPLOAD FOR MODELS
+# ============================================================================
+
+class S3ModelUploader:
+    """
+    Custom S3 uploader for model artifacts.
+    
+    This replaces DVC tracking for models, allowing direct upload to S3
+    with version tracking based on model filename (v1, v2, v3, etc.).
+    
+    Credentials are read from environment variables:
+        - AWS_ACCESS_KEY_ID
+        - AWS_SECRET_ACCESS_KEY
+        - AWS_DEFAULT_REGION (optional, defaults to 'us-east-1')
+    """
+    
+    @staticmethod
+    def upload_latest_model(
+        model_dir: str = "models",
+        model_name: str = "XGBClassifier",
+        s3_uri: str = "s3://mlops-capstone-project-final/models/",
+        upload_metadata: bool = True,
+        upload_metrics: bool = True
+    ) -> dict:
+        """
+        Upload the latest versioned model and its artifacts to S3.
+        
+        Args:
+            model_dir: Local directory containing models (default: 'models')
+            model_name: Base name of the model (default: 'XGBClassifier')
+            s3_uri: S3 URI for model storage (default: 's3://mlops-capstone-project-final/models/')
+            upload_metadata: Whether to upload metadata YAML file (default: True)
+            upload_metrics: Whether to upload metrics.json (default: True)
+            
+        Returns:
+            dict: Upload result with keys:
+                - 'success': bool
+                - 'uploaded_files': list of uploaded file paths
+                - 's3_paths': list of S3 URIs for uploaded files
+                - 'version': version number of uploaded model
+                - 'error': error message if failed
+                
+        Raises:
+            ValueError: If no versioned models found
+            Exception: If S3 upload fails
+        """
+        import boto3
+        from botocore.exceptions import ClientError, NoCredentialsError
+        
+        result = {
+            'success': False,
+            'uploaded_files': [],
+            's3_paths': [],
+            'version': None,
+            'error': None
+        }
+        
+        try:
+            # Parse S3 URI
+            if not s3_uri.startswith('s3://'):
+                raise ValueError(f"Invalid S3 URI: {s3_uri}. Must start with 's3://'")
+            
+            # Remove 's3://' and split into bucket and prefix
+            s3_path = s3_uri[5:]  # Remove 's3://'
+            if '/' in s3_path:
+                bucket_name = s3_path.split('/')[0]
+                s3_prefix = '/'.join(s3_path.split('/')[1:])
+                if not s3_prefix.endswith('/'):
+                    s3_prefix += '/'
+            else:
+                bucket_name = s3_path
+                s3_prefix = ''
+            
+            print(f"S3 Bucket: {bucket_name}")
+            print(f"S3 Prefix: {s3_prefix}")
+            
+            # Find latest version
+            existing_models = [f for f in os.listdir(model_dir) 
+                             if f.startswith(model_name) and f.endswith('.joblib') 
+                             and '_v' in f and '_latest' not in f]
+            
+            if not existing_models:
+                raise ValueError(f"No versioned models found in {model_dir}")
+            
+            versions = []
+            for fname in existing_models:
+                try:
+                    version_str = fname.replace(model_name + "_v", "").replace(".joblib", "")
+                    versions.append(int(version_str))
+                except ValueError:
+                    continue
+            
+            if not versions:
+                raise ValueError(f"Could not parse version from model filenames")
+            
+            latest_version = max(versions)
+            result['version'] = latest_version
+            print(f"Latest model version: v{latest_version}")
+            
+            # Initialize S3 client (credentials from environment variables)
+            s3_client = boto3.client(
+                's3',
+                aws_access_key_id=os.getenv('AWS_ACCESS_KEY_ID'),
+                aws_secret_access_key=os.getenv('AWS_SECRET_ACCESS_KEY'),
+                region_name=os.getenv('AWS_DEFAULT_REGION', 'us-east-1')
+            )
+            
+            # Files to upload
+            files_to_upload = []
+            
+            # Latest versioned model
+            model_filename = f"{model_name}_v{latest_version}.joblib"
+            model_path = os.path.join(model_dir, model_filename)
+            if os.path.exists(model_path):
+                files_to_upload.append((model_path, model_filename))
+            
+            # Latest symlink model
+            latest_filename = f"{model_name}_latest.joblib"
+            latest_path = os.path.join(model_dir, latest_filename)
+            if os.path.exists(latest_path):
+                files_to_upload.append((latest_path, latest_filename))
+            
+            # Metadata YAML
+            if upload_metadata:
+                metadata_filename = f"{model_name}_v{latest_version}_metadata.yaml"
+                metadata_path = os.path.join(model_dir, metadata_filename)
+                if os.path.exists(metadata_path):
+                    files_to_upload.append((metadata_path, metadata_filename))
+            
+            # Metrics JSON
+            if upload_metrics:
+                metrics_path = os.path.join(model_dir, "metrics.json")
+                if os.path.exists(metrics_path):
+                    files_to_upload.append((metrics_path, "metrics.json"))
+                
+                # Confusion matrix
+                cm_path = os.path.join(model_dir, "confusion_matrix.png")
+                if os.path.exists(cm_path):
+                    files_to_upload.append((cm_path, "confusion_matrix.png"))
+            
+            # Upload each file
+            for local_path, filename in files_to_upload:
+                s3_key = f"{s3_prefix}{filename}"
+                print(f"Uploading {filename} to s3://{bucket_name}/{s3_key}...")
+                
+                s3_client.upload_file(local_path, bucket_name, s3_key)
+                
+                result['uploaded_files'].append(local_path)
+                result['s3_paths'].append(f"s3://{bucket_name}/{s3_key}")
+                print(f"  ✓ Uploaded: {filename}")
+            
+            result['success'] = True
+            print(f"\n✓ Successfully uploaded {len(files_to_upload)} file(s) to S3")
+            
+        except NoCredentialsError:
+            result['error'] = "AWS credentials not found. Set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY environment variables."
+            print(f"✗ Error: {result['error']}")
+        except ClientError as e:
+            result['error'] = f"S3 client error: {str(e)}"
+            print(f"✗ Error: {result['error']}")
+        except Exception as e:
+            result['error'] = str(e)
+            print(f"✗ Error: {result['error']}")
+        
+        return result
+
+    @staticmethod
+    def download_model_from_s3(
+        s3_uri: str,
+        model_name: str = "XGBClassifier",
+        version: str = "latest",
+        local_dir: str = "models"
+    ) -> str:
+        """
+        Download a model from S3.
+        
+        Args:
+            s3_uri: Base S3 URI for models (e.g., 's3://mlops-capstone-project-final/models/')
+            model_name: Base name of the model (default: 'XGBClassifier')
+            version: Version to download ('latest' or 'v1', 'v2', etc.)
+            local_dir: Local directory to save the model (default: 'models')
+            
+        Returns:
+            str: Local path to downloaded model
+        """
+        import boto3
+        
+        # Parse S3 URI
+        s3_path = s3_uri[5:]  # Remove 's3://'
+        if '/' in s3_path:
+            bucket_name = s3_path.split('/')[0]
+            s3_prefix = '/'.join(s3_path.split('/')[1:])
+            if not s3_prefix.endswith('/'):
+                s3_prefix += '/'
+        else:
+            bucket_name = s3_path
+            s3_prefix = ''
+        
+        # Determine filename
+        if version == "latest":
+            filename = f"{model_name}_latest.joblib"
+        else:
+            # version can be 'v1', 'v2' or just '1', '2'
+            v = version.replace('v', '')
+            filename = f"{model_name}_v{v}.joblib"
+        
+        s3_key = f"{s3_prefix}{filename}"
+        local_path = os.path.join(local_dir, filename)
+        
+        # Create local directory if needed
+        os.makedirs(local_dir, exist_ok=True)
+        
+        # Initialize S3 client
+        s3_client = boto3.client(
+            's3',
+            aws_access_key_id=os.getenv('AWS_ACCESS_KEY_ID'),
+            aws_secret_access_key=os.getenv('AWS_SECRET_ACCESS_KEY'),
+            region_name=os.getenv('AWS_DEFAULT_REGION', 'us-east-1')
+        )
+        
+        print(f"Downloading s3://{bucket_name}/{s3_key} to {local_path}...")
+        s3_client.download_file(bucket_name, s3_key, local_path)
+        print(f"✓ Downloaded: {local_path}")
+        
+        return local_path
 
 
 def reduce_memory(df, verbose=True):

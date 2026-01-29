@@ -121,7 +121,7 @@ class DataIngestion:
             True if schemas are valid, raises exception otherwise
         """
         logger.info("Validating input data schemas...")
-        schema_yaml_path = "src/constants/schema.yaml"
+        schema_yaml_path = self.config.schema_yaml_path
         
         try:
             # Validate train_transaction schema
@@ -209,7 +209,7 @@ class DataIngestion:
             
             # Step 3: Save raw_data schema to schema.yaml
             logger.info("Saving raw_data schema to schema.yaml...")
-            schema_yaml_path = "src/constants/schema.yaml"
+            schema_yaml_path = self.config.schema_yaml_path
             Read_write_yaml_schema.save_dataframe_schema(
                 df=merged_df,
                 schema_name="raw_data",

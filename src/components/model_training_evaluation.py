@@ -31,8 +31,8 @@ from sklearn.metrics import (
 
 from src.logger import logger
 from src.exception import CustomException
-from src.utils import Read_write_yaml_schema, compare_schema_for_model_training
-from src.constants.config import ModelTrainingConfig
+from src.utils import Read_write_yaml_schema, compare_schema_for_model_training, S3ModelUploader
+from src.constants.config import ModelTrainingConfig, PredictionConfig
 
 
 # ============================================================================
@@ -485,11 +485,97 @@ class ModelTraining:
                 yaml.dump(metadata, f, default_flow_style=False)
             logger.info(f"✓ Metadata saved to: {metadata_path}")
             
+            # Cleanup old artifacts (models, metadata, confusion matrices, metrics)
+            # Keep only the latest version just saved
+            self.cleanup_old_artifacts(model_name, next_version)
+            
             return model_path
             
         except Exception as e:
             logger.error(f"Model save failed: {str(e)}")
             raise CustomException(e, sys)
+
+    def cleanup_old_artifacts(self, model_name: str, current_version: int) -> None:
+        """
+        Clean up old model artifacts, keeping only the latest version.
+        
+        Since older models are pushed to S3 via DVC, we only keep the latest
+        version locally to save disk space.
+        
+        Args:
+            model_name: Base name for the model (e.g., "XGBClassifier")
+            current_version: The version number of the model just saved (to keep)
+        """
+        logger.info(f"Cleaning up old artifacts (keeping only v{current_version})...")
+        
+        try:
+            files_deleted = 0
+            files_to_keep = {
+                f"{model_name}_v{current_version}.joblib",
+                f"{model_name}_v{current_version}_metadata.yaml",
+                f"{model_name}_latest.joblib",
+                "metrics.json",
+                "confusion_matrix.png",
+                ".gitkeep",
+                ".gitignore"
+            }
+            
+            for filename in os.listdir(self.config.model_save_dir):
+                filepath = os.path.join(self.config.model_save_dir, filename)
+                
+                # Skip directories
+                if os.path.isdir(filepath):
+                    continue
+                
+                # Skip files we want to keep
+                if filename in files_to_keep:
+                    continue
+                
+                # Delete old versioned models (e.g., XGBClassifier_v1.joblib, XGBClassifier_v2.joblib)
+                if filename.startswith(model_name) and '_v' in filename:
+                    # Extract version number to check if it's an older version
+                    try:
+                        if filename.endswith('.joblib'):
+                            version_str = filename.replace(model_name + "_v", "").replace(".joblib", "")
+                            version = int(version_str)
+                            if version < current_version:
+                                os.remove(filepath)
+                                logger.info(f"  Deleted old model: {filename}")
+                                files_deleted += 1
+                        elif filename.endswith('_metadata.yaml'):
+                            # Extract version from metadata filename
+                            version_str = filename.replace(model_name + "_v", "").replace("_metadata.yaml", "")
+                            version = int(version_str)
+                            if version < current_version:
+                                os.remove(filepath)
+                                logger.info(f"  Deleted old metadata: {filename}")
+                                files_deleted += 1
+                    except ValueError:
+                        # Could not parse version, skip
+                        continue
+                
+                # Delete old confusion matrix files (if any with different naming)
+                elif filename.startswith("confusion_matrix") and filename.endswith(".png"):
+                    if filename != "confusion_matrix.png":
+                        os.remove(filepath)
+                        logger.info(f"  Deleted old confusion matrix: {filename}")
+                        files_deleted += 1
+                
+                # Delete old metrics files (if any with different naming)
+                elif filename.startswith("metrics") and filename.endswith(".json"):
+                    if filename != "metrics.json":
+                        os.remove(filepath)
+                        logger.info(f"  Deleted old metrics file: {filename}")
+                        files_deleted += 1
+            
+            if files_deleted > 0:
+                logger.info(f"✓ Cleaned up {files_deleted} old artifact(s)")
+            else:
+                logger.info("✓ No old artifacts to clean up")
+                
+        except Exception as e:
+            # Don't fail the pipeline if cleanup fails, just log warning
+            logger.warning(f"⚠ Cleanup failed (non-critical): {str(e)}")
 
     def run(self) -> Tuple[XGBClassifier, str]:
         """
@@ -535,13 +621,29 @@ class ModelTraining:
             logger.info("\nStep 5: Training model...")
             model = self.train(X_train, y_train, X_test, y_test)
             
-            # Step 6: Save model
-            logger.info("\nStep 6: Saving model...")
+            # Step 6: Save model locally
+            logger.info("\nStep 6: Saving model locally...")
             model_path = self.save_model(model)
+            
+            # Step 7: Upload model to S3
+            logger.info("\nStep 7: Uploading model to S3...")
+            s3_result = S3ModelUploader.upload_latest_model(
+                model_dir=self.config.model_save_dir,
+                model_name="XGBClassifier",
+                s3_uri=PredictionConfig.s3_model_uri,
+                upload_metadata=True,
+                upload_metrics=True
+            )
+            
+            if s3_result['success']:
+                logger.info(f"✓ Model uploaded to S3: {s3_result['s3_paths']}")
+            else:
+                logger.warning(f"⚠ S3 upload failed: {s3_result['error']}")
             
             logger.info("=" * 60)
             logger.info("MODEL TRAINING PIPELINE COMPLETED SUCCESSFULLY!")
-            logger.info(f"Model saved to: {model_path}")
+            logger.info(f"Model saved locally to: {model_path}")
+            logger.info(f"Model uploaded to S3: {PredictionConfig.s3_model_uri}")
             logger.info(f"Metrics saved to: {self.config.model_save_dir}/metrics.json")
             logger.info(f"MLflow run ID: {self.run_id}")
             logger.info("=" * 60)

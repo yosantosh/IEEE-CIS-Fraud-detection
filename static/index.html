@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fraud Detection - IEEE-CIS</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/styles.css">
+</head>
+<body>
+    <div class="background-effects">
+        <div class="gradient-orb orb-1"></div>
+        <div class="gradient-orb orb-2"></div>
+        <div class="gradient-orb orb-3"></div>
+    </div>
+
+    <div class="container">
+        <header class="header">
+            <div class="logo">
+                <svg class="logo-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M12 2L2 7L12 12L22 7L12 2Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    <path d="M2 17L12 22L22 17" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    <path d="M2 12L12 17L22 12" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+                <span>Fraud Detection</span>
+            </div>
+            <div class="status-indicator" id="api-status">
+                <span class="status-dot"></span>
+                <span class="status-text">Checking...</span>
+            </div>
+        </header>
+
+        <main class="main-content">
+            <section class="glass-card input-section">
+                <h2>Batch Prediction</h2>
+                <p class="subtitle">Paste transaction data from Excel or Google Sheets (tab-separated)</p>
+                
+                <div class="textarea-wrapper">
+                    <textarea 
+                        id="paste-area" 
+                        placeholder="Paste your spreadsheet data here...&#10;&#10;Headers should be in the first row.&#10;Example: TransactionID&#9;TransactionAmt&#9;ProductCD&#9;..."
+                        rows="8"
+                    ></textarea>
+                    <div class="textarea-actions">
+                        <button class="btn btn-text" id="clear-btn" title="Clear input">
+                            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                <path d="M18 6L6 18M6 6L18 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+
+                <div class="preview-section" id="preview-section" style="display: none;">
+                    <h3>Data Preview <span id="row-count" class="badge"></span></h3>
+                    <div class="table-wrapper">
+                        <table id="preview-table">
+                            <thead id="preview-header"></thead>
+                            <tbody id="preview-body"></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div class="action-bar">
+                    <button class="btn btn-primary" id="predict-btn" disabled>
+                        <svg class="btn-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M5 12H19M19 12L12 5M19 12L12 19" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                        </svg>
+                        <span>Predict Fraud</span>
+                    </button>
+                </div>
+            </section>
+
+            <section class="glass-card results-section" id="results-section" style="display: none;">
+                <div class="results-header">
+                    <h2>Prediction Results</h2>
+                    <button class="btn btn-text" id="download-btn" title="Download CSV">
+                        <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M21 15V19C21 19.5304 20.7893 20.0391 20.4142 20.4142C20.0391 20.7893 19.5304 21 19 21H5C4.46957 21 3.96086 20.7893 3.58579 20.4142C3.21071 20.0391 3 19.5304 3 19V15" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                            <path d="M7 10L12 15L17 10" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                            <path d="M12 15V3" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                        </svg>
+                    </button>
+                </div>
+
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <span class="stat-value" id="total-count">0</span>
+                        <span class="stat-label">Total Transactions</span>
+                    </div>
+                    <div class="stat-card fraud">
+                        <span class="stat-value" id="fraud-count">0</span>
+                        <span class="stat-label">Fraud Detected</span>
+                    </div>
+                    <div class="stat-card safe">
+                        <span class="stat-value" id="safe-count">0</span>
+                        <span class="stat-label">Safe Transactions</span>
+                    </div>
+                    <div class="stat-card">
+                        <span class="stat-value" id="fraud-rate">0%</span>
+                        <span class="stat-label">Fraud Rate</span>
+                    </div>
+                </div>
+
+                <div class="table-wrapper results-table-wrapper">
+                    <table id="results-table">
+                        <thead>
+                            <tr>
+                                <th>TransactionID</th>
+                                <th>isFraud</th>
+                            </tr>
+                        </thead>
+                        <tbody id="results-body"></tbody>
+                    </table>
+                </div>
+            </section>
+        </main>
+
+        <div class="loading-overlay" id="loading-overlay" style="display: none;">
+            <div class="spinner"></div>
+            <p>Processing predictions...</p>
+        </div>
+    </div>
+
+    <script src="/static/js/app.js"></script>
+</body>
+</html>

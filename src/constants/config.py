@@ -9,8 +9,8 @@ Usage:
 """
 
 import os
-from dataclasses import dataclass
-from typing import Optional
+from dataclasses import dataclass, field
+from typing import Optional, List, Dict, Any
 
 
 # ============================================================================
@@ -28,7 +28,7 @@ class DataIngestionConfig:
     
     # Row limit for reading data (None = read all rows, set to int for sampling)
     # Useful for development/testing with large datasets
-    nrows: Optional[int] = 100000  # e.g., 10000 for quick testing, None for full dataset
+    nrows: Optional[int] = 20000  # e.g., 10000 for quick testing, None for full dataset
     
     # S3 settings (from environment variables)
     bucket_name: str = os.getenv("S3_BUCKET_NAME", "mlops-capstone-project-final")
@@ -60,6 +60,47 @@ class DataTransformationConfig:
     train_schema_name: str = "preprocessed_train"
     test_schema_name: str = "preprocessed_test"
 
+    # Feature Engineering Parameters
+    # Transaction Amount
+    trans_amt_bins: List[int] = field(default_factory=lambda: [0, 50, 100, 200, 500, 1000, 5000, 10_000, float('inf')])
+    trans_amt_labels: List[int] = field(default_factory=lambda: [0, 1, 2, 3, 4, 5, 6, 7])
+    
+    # Time Features
+    time_of_day_bins: List[int] = field(default_factory=lambda: [-1, 6, 12, 18, 24])
+    time_of_day_labels: List[int] = field(default_factory=lambda: [0, 1, 2, 3])
+    
+    # Column Groups
+    card_cols: List[str] = field(default_factory=lambda: ['card1', 'card2', 'card3', 'card4', 'card5', 'card6'])
+    address_cols: List[str] = field(default_factory=lambda: ['addr1', 'addr2'])
+    email_domains: List[str] = field(default_factory=lambda: ['P_emaildomain', 'R_emaildomain'])
+    
+    # Aggregation & Frequency
+    frequency_encoded_cols: List[str] = field(default_factory=lambda: [
+        'card1', 'card2', 'card3', 'card4', 'card5', 'card6', 
+        'addr1', 'addr2', 'P_emaildomain', 'R_emaildomain', 
+        'ProductCD', 'DeviceType', 'DeviceInfo'
+    ])
+    aggregation_cols: List[str] = field(default_factory=lambda: ['card1', 'card2', 'addr1'])
+    
+    # UID Features
+    uid_cols: List[str] = field(default_factory=lambda: ['uid1', 'uid2', 'uid3', 'uid4'])
+    enhanced_freq_cols: List[str] = field(default_factory=lambda: [
+        'uid1', 'uid2', 'uid3', 'uid4', 
+        'card1', 'card2', 'addr1', 'P_emaildomain', 
+        'DeviceType', 'DeviceInfo'
+    ])
+    
+    # Email Maps
+    email_vendor_map: Dict[str, str] = field(default_factory=lambda: {
+        'gmail': 'google', 'yahoo': 'yahoo', 'hotmail': 'microsoft', 
+        'outlook': 'microsoft', 'live': 'microsoft', 'msn': 'microsoft', 
+        'icloud': 'apple', 'aol': 'aol'
+    })
+    
+    # Preprocessing
+    pca_n_components: float = 0.96
+    fill_value: int = -999
+
 
 # ============================================================================
 # MODEL TRAINING CONFIGURATION
@@ -88,6 +129,27 @@ class ModelTrainingConfig:
     # Schema validation
     schema_name: str = "preprocessed_train"
     strict_schema_validation: bool = True  # STRICT MODE - fail on mismatch!
+
+
+
+@dataclass
+class PredictionConfig:
+    """Configuration for prediction pipeline."""
+    # S3 settings
+    s3_model_uri: str = 's3://mlops-capstone-project-final/models/'
+    model_name: str = "XGBClassifier"
+    model_version: str = "latest"  # 'latest', 'v1', 'v2', etc.
+    local_model_dir: str = "models"
+    
+    # Schema settings
+    schema_yaml_path: str = "src/constants/schema.yaml"
+    raw_schema_name: str = "raw_data"
+    target_column: str = "isFraud"
+    
+    # AWS settings (from environment)
+    aws_access_key: str = os.getenv('AWS_ACCESS_KEY_ID', '')
+    aws_secret_key: str = os.getenv('AWS_SECRET_ACCESS_KEY', '')
+    aws_region: str = os.getenv('AWS_DEFAULT_REGION', 'us-east-1')
 
 
 # ============================================================================

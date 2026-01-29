@@ -54,8 +54,8 @@ stages:
       - src/constants/params.yaml:
           - model_params.XGBClassifier
           - model_training
-    outs:
-      - models/XGBClassifier_latest.joblib
+    # NOTE: Models are now uploaded directly to S3 via custom function (not DVC)
+    # The S3ModelUploader in src/utils handles upload to s3://mlops-capstone-project-final/models/
     metrics:
       - models/metrics.json:
           cache: false

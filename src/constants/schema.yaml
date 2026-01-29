@@ -1674,7 +1674,6 @@ preprocessed_train:
   pca99: float64
   pca100: float64
   pca101: float64
-  pca102: float64
   isFraud: int64
 preprocessed_test:
   TransactionID: float64
@@ -2044,5 +2043,4 @@ preprocessed_test:
   pca99: float64
   pca100: float64
   pca101: float64
-  pca102: float64
   isFraud: int64

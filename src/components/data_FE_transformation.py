@@ -12,6 +12,7 @@ import os
 import sys
 import numpy as np
 import pandas as pd
+import joblib
 from typing import Optional
 
 from sklearn.model_selection import train_test_split, KFold
@@ -49,8 +50,8 @@ class Data_FE_Transformation:
         # Amount bin: it can reduce noise by smoothing and other benefits too
         df['TransactionAmt_bins'] = pd.cut(
             df['TransactionAmt'].astype('float32'),
-            bins=[0, 50, 100, 200, 500, 1000, 5000, 10_000, np.inf],
-            labels=[0, 1, 2, 3, 4, 5, 6, 7]
+            bins=self.config.trans_amt_bins,
+            labels=self.config.trans_amt_labels
         ).astype(float)
         
         # Value in cents
@@ -60,7 +61,7 @@ class Data_FE_Transformation:
         df['TransactionAmt_is_micro'] = (df['TransactionAmt'] < 10).astype(int)
         
         # Sudden amount jump
-        card_cols = ['card1', 'card2', 'card3', 'card4', 'card5', 'card6']
+        card_cols = self.config.card_cols
         df['card_id'] = df[card_cols].fillna('nan').astype(str).agg('_'.join, axis=1)
         
         df = df.sort_values(['card_id', 'TransactionDT'])
@@ -120,8 +121,8 @@ class Data_FE_Transformation:
         # 0 = night, 1 = morning, 2 = afternoon, 3 = evening
         df['Transaction_time_of_day'] = pd.cut(
             df['Transaction_hour'],
-            bins=[-1, 6, 12, 18, 24],
-            labels=[0, 1, 2, 3]
+            bins=self.config.time_of_day_bins,
+            labels=self.config.time_of_day_labels
         ).astype(int)
 
         # -------------------------
@@ -179,7 +180,7 @@ class Data_FE_Transformation:
         "This func create card related features"
         print("Start creating card Features...")
 
-        card_cols = ['card1', 'card2', 'card3', 'card4', 'card5', 'card6']
+        card_cols = self.config.card_cols
         for i in card_cols:
             if i in df.columns:
                 df[i]=df[i].fillna(-1).astype(str)
@@ -246,23 +247,14 @@ class Data_FE_Transformation:
 
 
         # normalize & fill
-        for col in ['P_emaildomain', 'R_emaildomain']:
+        for col in self.config.email_domains:
             if col in df.columns:
                 df[col] = df[col].fillna('missing').astype(str).str.lower()
             else:
                 df[col] = 'missing'  # ensures downstream code won't fail
 
         # vendor map
-        vendor_map = {
-            'gmail': 'google',
-            'yahoo': 'yahoo',
-            'hotmail': 'microsoft',
-            'outlook': 'microsoft',
-            'live': 'microsoft',
-            'msn': 'microsoft',
-            'icloud': 'apple',
-            'aol': 'aol'
-        }
+        vendor_map = self.config.email_vendor_map
 
         def get_vendor(domain):
             _, dom, _ = extract_domain_parts(domain)
@@ -317,37 +309,75 @@ class Data_FE_Transformation:
 
 
 
-    def create_device_features(self,df:pd.DataFrame)->pd.DataFrame:
+    def create_device_features(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Create device-related features with safe string handling."""
         print("Creating device features...")
+        
+        # Helper function for safe string splitting
+        def safe_split_get(value, delimiter=' ', index=0, default='unknown'):
+            """Safely split a string and get element at index, with fallback."""
+            if pd.isna(value):
+                return default
+            parts = str(value).split(delimiter)
+            return parts[index] if len(parts) > index and parts[index] else default
+        
+        # Device type features
+        if 'DeviceType' in df.columns:
+            df['DeviceType_is_mobile'] = (df['DeviceType'] == 'mobile').astype(int)
+            df['DeviceType_is_desktop'] = (df['DeviceType'] == 'desktop').astype(int)
+        else:
+            df['DeviceType_is_mobile'] = 0
+            df['DeviceType_is_desktop'] = 0
 
-        #device type
-        df['DeviceType_is_mobile']  = (df.DeviceType == 'mobile').astype(int)
-        df['DeviceType_is_desktop']  = (df.DeviceType == 'desktop').astype(int)
-
-        #device info : it can give important patterns , we just need to specific about multiple 
+        # Device info features
         if 'DeviceInfo' in df.columns:
-            df['Device_brand'] = df.DeviceInfo.apply(
-                lambda x: str(x).split('/')[0].split()[0] if pd.notna(x) else 'unknown'
-            )
+            # Safe brand extraction: split by '/' first, then by space
+            def get_device_brand(x):
+                if pd.isna(x):
+                    return 'unknown'
+                s = str(x)
+                first_part = s.split('/')[0] if '/' in s else s
+                parts = first_part.split()
+                return parts[0] if parts else 'unknown'
             
-
-            #device info length it will show device complexity even strange device could have long name
-            df['DeviceInfo_length'] = df.DeviceInfo.apply(
+            df['Device_brand'] = df['DeviceInfo'].apply(get_device_brand)
+            
+            # Device info length
+            df['DeviceInfo_length'] = df['DeviceInfo'].apply(
                 lambda x: len(str(x)) if pd.notna(x) else 0
-            ) 
+            )
 
+        # Browser features from id_31
+        if 'id_31' in df.columns:
+            def get_browser_name(x):
+                if pd.isna(x):
+                    return 'unknown'
+                parts = str(x).split()
+                return parts[0].lower() if parts else 'unknown'
+            
+            df['browser'] = df['id_31'].apply(get_browser_name)
+            df['Broser_is_chrome'] = df['id_31'].apply(lambda x: 1 if pd.notna(x) and 'chrome' in str(x).lower() else 0)
+            df['Broser_is_firefox'] = df['id_31'].apply(lambda x: 1 if pd.notna(x) and 'firefox' in str(x).lower() else 0)
+            df['Broser_is_edge'] = df['id_31'].apply(lambda x: 1 if pd.notna(x) and 'edge' in str(x).lower() else 0)
+            df['Broser_is_safari'] = df['id_31'].apply(lambda x: 1 if pd.notna(x) and 'safari' in str(x).lower() else 0)
 
-            #browser features
-            if 'id_31' in df.columns:
-                df['browser'] = df.id_31.apply(lambda x: str(x).split()[0].lower() if pd.notna(x) else 'unknown')
-                df['Broser_is_chrome'] = df.id_31.apply(lambda x: 1 if pd.notna(x) and 'chrome' in str(x).lower() else 0)
-                df['Broser_is_firefox'] = df.id_31.apply(lambda x: 1 if pd.notna(x) and 'firefox' in str(x).lower() else 0)
-                df['Broser_is_edge'] = df.id_31.apply(lambda x: 1 if pd.notna(x) and 'edge' in str(x).lower() else 0)
-                df['Broser_is_safari'] = df.id_31.apply(lambda x: 1 if pd.notna(x) and 'safari' in str(x).lower() else 0)
-
-
-            #os features from id_30
-            df[['os_name','os_version']] = df.id_30.fillna('unknown unknown').astype(str).str.split(' ',n=1,expand=True)
+        # OS features from id_30
+        if 'id_30' in df.columns:
+            # Safe OS name and version extraction
+            def get_os_name(x):
+                if pd.isna(x):
+                    return 'unknown'
+                parts = str(x).split(' ', 1)
+                return parts[0] if parts and parts[0] else 'unknown'
+            
+            def get_os_version(x):
+                if pd.isna(x):
+                    return 'unknown'
+                parts = str(x).split(' ', 1)
+                return parts[1] if len(parts) > 1 and parts[1] else 'unknown'
+            
+            df['os_name'] = df['id_30'].apply(get_os_name)
+            df['os_version'] = df['id_30'].apply(get_os_version)
             
             df['OS_is_Windows'] = df['id_30'].apply(
                 lambda x: 1 if pd.notna(x) and 'windows' in str(x).lower() else 0
@@ -361,15 +391,30 @@ class Data_FE_Transformation:
             df['OS_is_Android'] = df['id_30'].apply(
                 lambda x: 1 if pd.notna(x) and 'android' in str(x).lower() else 0
             )
+        else:
+            # Create default columns if id_30 doesn't exist
+            df['os_name'] = 'unknown'
+            df['os_version'] = 'unknown'
+            df['OS_is_Windows'] = 0
+            df['OS_is_Mac'] = 0
+            df['OS_is_iOS'] = 0
+            df['OS_is_Android'] = 0
                 
         # Screen resolution from id_33
         if 'id_33' in df.columns:
-            df['Screen_width'] = df['id_33'].apply(
-                lambda x: int(str(x).split('x')[0]) if pd.notna(x) and 'x' in str(x) else -1
-            )
-            df['Screen_height'] = df['id_33'].apply(
-                lambda x: int(str(x).split('x')[1]) if pd.notna(x) and 'x' in str(x) else -1
-            )
+            def get_screen_dimension(x, index):
+                if pd.isna(x) or 'x' not in str(x):
+                    return -1
+                parts = str(x).split('x')
+                if len(parts) > index:
+                    try:
+                        return int(parts[index])
+                    except (ValueError, TypeError):
+                        return -1
+                return -1
+            
+            df['Screen_width'] = df['id_33'].apply(lambda x: get_screen_dimension(x, 0))
+            df['Screen_height'] = df['id_33'].apply(lambda x: get_screen_dimension(x, 1))
             df['Screen_area'] = df['Screen_width'] * df['Screen_height']
             df['Screen_aspect_ratio'] = df.apply(
                 lambda row: row['Screen_width'] / row['Screen_height'] if row['Screen_height'] > 0 else -1, axis=1
@@ -404,17 +449,19 @@ class Data_FE_Transformation:
         # dist1 and dist2 features
         if 'dist1' in df.columns:
             df['dist1_missing'] = df['dist1'].isna().astype(int)
-            df['dist1_log'] = np.log1p(df['dist1'].fillna(0))
+            # Handle empty strings and non-numeric values
+            df['dist1_log'] = np.log1p(pd.to_numeric(df['dist1'], errors='coerce').fillna(0))
         
         if 'dist2' in df.columns:
             df['dist2_missing'] = df['dist2'].isna().astype(int)
-            df['dist2_log'] = np.log1p(df['dist2'].fillna(0))
+            # Handle empty strings and non-numeric values
+            df['dist2_log'] = np.log1p(pd.to_numeric(df['dist2'], errors='coerce').fillna(0))
         print('Address features has been created!')
         return df
 
 
 
-    def create_v_features(self,df):
+    def create_v_features(self, df):
         """Create aggregation features from V columns"""
         print("Creating V-column aggregation features...")
         
@@ -423,6 +470,10 @@ class Data_FE_Transformation:
         
         if len(v_cols) == 0:
             return df
+        
+        # Convert all V columns to numeric (handles empty strings and other non-numeric values)
+        for col in v_cols:
+            df[col] = pd.to_numeric(df[col], errors='coerce')
         
         # Group V columns by their correlation patterns (based on EDA from competition)
         v_groups = {
@@ -440,14 +491,14 @@ class Data_FE_Transformation:
             existing_cols = [col for col in group_cols if col in df.columns]
             
             if len(existing_cols) > 0:
-                # Sum of group
-                df[f'{group_name}_sum'] = df[existing_cols].sum(axis=1)
+                # Sum of group (skipna handles NaN)
+                df[f'{group_name}_sum'] = df[existing_cols].sum(axis=1, skipna=True)
                 
                 # Mean of group
-                df[f'{group_name}_mean'] = df[existing_cols].mean(axis=1)
+                df[f'{group_name}_mean'] = df[existing_cols].mean(axis=1, skipna=True)
                 
                 # Std of group
-                df[f'{group_name}_std'] = df[existing_cols].std(axis=1)
+                df[f'{group_name}_std'] = df[existing_cols].std(axis=1, skipna=True)
                 
                 # NaN count in group
                 df[f'{group_name}_nan_count'] = df[existing_cols].isna().sum(axis=1)
@@ -455,9 +506,9 @@ class Data_FE_Transformation:
         # Overall V statistics
         existing_v_cols = [col for col in v_cols if col in df.columns]
         if len(existing_v_cols) > 0:
-            df['V_sum_all'] = df[existing_v_cols].sum(axis=1)
-            df['V_mean_all'] = df[existing_v_cols].mean(axis=1)
-            df['V_std_all'] = df[existing_v_cols].std(axis=1)
+            df['V_sum_all'] = df[existing_v_cols].sum(axis=1, skipna=True)
+            df['V_mean_all'] = df[existing_v_cols].mean(axis=1, skipna=True)
+            df['V_std_all'] = df[existing_v_cols].std(axis=1, skipna=True)
             df['V_nan_count_all'] = df[existing_v_cols].isna().sum(axis=1)
             df['V_nan_ratio'] = df['V_nan_count_all'] / len(existing_v_cols)
         print("V-column aggregation features are created!")    
@@ -473,9 +524,7 @@ class Data_FE_Transformation:
         train_df = train_df.copy()
         
         # 3. Columns for frequency encoding
-        freq_cols = ['card1', 'card2', 'card3', 'card4', 'card5', 'card6', 
-                    'addr1', 'addr2', 'P_emaildomain', 'R_emaildomain',
-                    'ProductCD', 'DeviceType', 'DeviceInfo']
+        freq_cols = self.config.frequency_encoded_cols
         
         for col in freq_cols:
             if col in train_df.columns:
@@ -485,7 +534,7 @@ class Data_FE_Transformation:
         
         # 4. Transaction amount aggregations
         # Note: 'card1_card2' must exist in df before running this
-        agg_cols = ['card1', 'card2', 'addr1'] 
+        agg_cols = self.config.aggregation_cols 
         
         for col in agg_cols:
             if col in train_df.columns:
@@ -506,7 +555,7 @@ class Data_FE_Transformation:
 
 
 
-    def create_id_features(self,df):
+    def create_id_features(self, df):
         """Create features from identity columns"""
         print("Creating ID features...")
         
@@ -514,10 +563,15 @@ class Data_FE_Transformation:
         id_num_cols = [f'id_0{i}' for i in range(1, 10)] + ['id_10', 'id_11']
         existing_id_num = [col for col in id_num_cols if col in df.columns]
         
+        # Ensure numerical ID columns are actually numeric
+        for col in existing_id_num:
+            df[col] = pd.to_numeric(df[col], errors='coerce')
+        
         if len(existing_id_num) > 0:
             df['id_num_nan_count'] = df[existing_id_num].isna().sum(axis=1)
-            df['id_num_mean'] = df[existing_id_num].mean(axis=1)
-            df['id_num_std'] = df[existing_id_num].std(axis=1)
+            # Use columns directly since they are now numeric
+            df['id_num_mean'] = df[existing_id_num].mean(axis=1, skipna=True)
+            df['id_num_std'] = df[existing_id_num].std(axis=1, skipna=True)
         
         # id_12 to id_38 are categorical
         # Check specific important ones
@@ -603,7 +657,7 @@ class Data_FE_Transformation:
 
         df = df.sort_values('TransactionDT').reset_index(drop=True)
         
-        uid_cols = ['uid1', 'uid2', 'uid3', 'uid4']
+        uid_cols = self.config.uid_cols
         
         for uid in uid_cols:
             print(f"  Processing {uid}...")
@@ -635,9 +689,7 @@ class Data_FE_Transformation:
         """
         print("🔥 Creating enhanced frequency features...")
         
-        freq_cols = ['uid1', 'uid2', 'uid3', 'uid4', 
-                    'card1', 'card2', 'addr1', 'P_emaildomain',
-                    'DeviceType', 'DeviceInfo']
+        freq_cols = self.config.enhanced_freq_cols
         
         for col in freq_cols:
             if col in df.columns:
@@ -690,18 +742,18 @@ class Data_FE_Transformation:
         logger.info(f"Categorical columns: {len(cat_cols)}, Numerical columns: {len(num_cols)}, V columns: {len(v_cols)}")
         
         # Define transformers
-        num_transformer = SimpleImputer(strategy='constant', fill_value=-999)
+        num_transformer = SimpleImputer(strategy='constant', fill_value=self.config.fill_value)
         
         cat_transformer = OrdinalEncoder(
             handle_unknown='use_encoded_value', 
             unknown_value=-1,
-            encoded_missing_value=-999
+            encoded_missing_value=self.config.fill_value
         )
 
         v_pca = make_pipeline(
             SimpleImputer(strategy='mean'),
             StandardScaler(),
-            PCA(n_components=0.96, svd_solver='full')
+            PCA(n_components=self.config.pca_n_components, svd_solver='full')
         )
 
         # Build column transformer
@@ -718,6 +770,16 @@ class Data_FE_Transformation:
 
         # Fit on Train only (prevent data leakage)
         X_train_processed = preprocessor.fit_transform(X_train)
+        
+        # SAVE PREPROCESSOR
+        try:
+            model_dir = "models"
+            os.makedirs(model_dir, exist_ok=True)
+            preprocessor_path = os.path.join(model_dir, "preprocessor.joblib")
+            joblib.dump(preprocessor, preprocessor_path)
+            logger.info(f"✓ Preprocessor saved to: {preprocessor_path}")
+        except Exception as e:
+            logger.error(f"Failed to save preprocessor: {str(e)}")
         
         # Transform Test using fitted preprocessor
         X_test_processed = preprocessor.transform(X_test)
@@ -775,7 +837,7 @@ class Data_FE_Transformation:
             
             # Step 1.5: Compare raw_data schema with schema.yaml (STRICT VALIDATION!)
             logger.info("Step 1.5: Validating raw_data schema against schema.yaml...")
-            schema_yaml_path = "src/constants/schema.yaml"
+            schema_yaml_path = self.config.schema_yaml_path
             try:
                 schema_result = Read_write_yaml_schema.compare_schema(
                     df=df,
@@ -937,7 +999,7 @@ class Data_FE_Transformation:
             # Step 16: Save preprocessed schema to schema.yaml
             logger.info("Step 16: Saving preprocessed data schema to schema.yaml...")
             try:
-                schema_yaml_path = "src/constants/schema.yaml"
+                schema_yaml_path = self.config.schema_yaml_path
                 
                 # Save Train_transformed schema
                 Read_write_yaml_schema.save_dataframe_schema(

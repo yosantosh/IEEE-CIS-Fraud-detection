@@ -1,11 +1,11 @@
 {
-  "train_roc_auc": 1.0,
-  "train_f1_score": 0.997080291970803,
-  "train_precision": 0.9941775836972343,
-  "train_recall": 1.0,
-  "test_roc_auc": 0.9472157144781403,
-  "test_f1_score": 0.7235023041474654,
-  "test_precision": 0.8820224719101124,
-  "test_recall": 0.61328125,
-  "test_accuracy": 0.988
+  "train_roc_auc": 0.9967053233297607,
+  "train_f1_score": 0.7829560585885486,
+  "train_precision": 0.9767441860465116,
+  "train_recall": 0.6533333333333333,
+  "test_roc_auc": 0.8956174676660789,
+  "test_f1_score": 0.4605263157894737,
+  "test_precision": 0.875,
+  "test_recall": 0.3125,
+  "test_accuracy": 0.9795
 }

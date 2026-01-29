@@ -1,0 +1,42 @@
+metrics:
+  test:
+    accuracy: 0.9795
+    average_precision: 0.5585963025476235
+    f1_score: 0.4605263157894737
+    false_negatives: 77
+    false_positives: 5
+    precision: 0.875
+    recall: 0.3125
+    roc_auc: 0.8956174676660789
+    true_negatives: 3883
+    true_positives: 35
+  train:
+    accuracy: 0.9898125
+    average_precision: 0.9330084595955206
+    f1_score: 0.7829560585885486
+    false_negatives: 156
+    false_positives: 7
+    precision: 0.9767441860465116
+    recall: 0.6533333333333333
+    roc_auc: 0.9967053233297607
+    true_negatives: 15543
+    true_positives: 294
+model_name: XGBClassifier
+model_path: models/XGBClassifier_v4.joblib
+params:
+  colsample_bytree: 0.7
+  device: cuda
+  early_stopping_rounds: 80
+  eval_metric: auc
+  learning_rate: 0.02
+  max_depth: 10
+  min_child_weight: 5
+  n_estimators: 3000
+  objective: binary:logistic
+  reg_alpha: 1
+  reg_lambda: 2
+  scale_pos_weight: 27
+  subsample: 0.8
+  tree_method: hist
+run_id: f54ec384cccf44408cb9483728416eff
+version: 4

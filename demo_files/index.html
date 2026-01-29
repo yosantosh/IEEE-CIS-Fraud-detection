@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Vehicle Insurance Prediction</title>
+    <link rel="stylesheet" href="../static/css/style.css">
+</head>
+<body>
+    <div class="container">
+        <h1>Vehicle Insurance Response Prediction</h1>
+
+        <div class="glass-form" style="margin-bottom:18px; text-align:left;">
+            <label for="paste-area">Paste table from Excel (Ctrl+V) here:</label>
+            <textarea id="paste-area" placeholder="Paste spreadsheet cells copied from Excel or Google Sheets" rows="4" style="width:100%; padding:12px; border-radius:8px; background:transparent; border:1px solid rgba(255,255,255,0.04); color:#fff;"></textarea>
+            <div id="paste-preview" style="margin-top:14px;"></div>
+        </div>
+
+        <form id="prediction-form" class="glass-form">
+            <div class="form-group">
+                <label for="Gender">Gender:</label>
+                <select name="Gender" id="Gender" required>
+                    <option value="">Select Gender</option>
+                    <option value="0">Female</option>
+                    <option value="1">Male</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="Age">Age:</label>
+                <input type="number" name="Age" id="Age" min="18" max="100" required>
+            </div>
+            <div class="form-group">
+                <label for="Driving_License">Driving License:</label>
+                <select name="Driving_License" id="Driving_License" required>
+                    <option value="">Select</option>
+                    <option value="0">No</option>
+                    <option value="1">Yes</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="Region_Code">Region Code:</label>
+                <input type="number" name="Region_Code" id="Region_Code" step="0.01" required>
+            </div>
+            <div class="form-group">
+                <label for="Previously_Insured">Previously Insured:</label>
+                <select name="Previously_Insured" id="Previously_Insured" required>
+                    <option value="">Select</option>
+                    <option value="0">No</option>
+                    <option value="1">Yes</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="Annual_Premium">Annual Premium:</label>
+                <input type="number" name="Annual_Premium" id="Annual_Premium" step="0.01" required>
+            </div>
+            <div class="form-group">
+                <label for="Policy_Sales_Channel">Policy Sales Channel:</label>
+                <input type="number" name="Policy_Sales_Channel" id="Policy_Sales_Channel" step="0.01" required>
+            </div>
+            <div class="form-group">
+                <label for="Vintage">Vintage (days):</label>
+                <input type="number" name="Vintage" id="Vintage" min="0" required>
+            </div>
+            <div class="form-group">
+                <label for="Vehicle_Age_lt_1_Year">Vehicle Age < 1 Year:</label>
+                <select name="Vehicle_Age_lt_1_Year" id="Vehicle_Age_lt_1_Year" required>
+                    <option value="">Select</option>
+                    <option value="0">No</option>
+                    <option value="1">Yes</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="Vehicle_Age_gt_2_Years">Vehicle Age > 2 Years:</label>
+                <select name="Vehicle_Age_gt_2_Years" id="Vehicle_Age_gt_2_Years" required>
+                    <option value="">Select</option>
+                    <option value="0">No</option>
+                    <option value="1">Yes</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="Vehicle_Damage_Yes">Vehicle Damage:</label>
+                <select name="Vehicle_Damage_Yes" id="Vehicle_Damage_Yes" required>
+                    <option value="">Select</option>
+                    <option value="0">No</option>
+                    <option value="1">Yes</option>
+                </select>
+            </div>
+            <button type="submit" class="submit-btn">Predict</button>
+        </form>
+        <div id="result" class="glass-card" style="display: none;">
+            <h2>Prediction Result</h2>
+            <p id="result-text"></p>
+        </div>
+    </div>
+    <script src="../static/js/batch.js"></script>
+</body>
+</html>
