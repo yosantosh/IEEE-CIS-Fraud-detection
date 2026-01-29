@@ -1,8 +1,17 @@
+"""
+Data Feature Engineering & Transformation Component
+====================================================
+This module handles feature engineering and data transformation
+for the IEEE-CIS Fraud Detection Pipeline.
+
+Usage with DVC:
+    dvc repro data_transformation
+"""
+
 import os
 import sys
 import numpy as np
 import pandas as pd
-from dataclasses import dataclass
 from typing import Optional
 
 from sklearn.model_selection import train_test_split, KFold
@@ -12,27 +21,17 @@ from sklearn.decomposition import PCA
 from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import make_pipeline
 
-from src.utils import reduce_memory
+from src.utils import reduce_memory, Read_write_yaml_schema
 from src.logger import logger
 from src.exception import CustomException
-
-
-@dataclass
-class Data_transformation:
-    raw_data_path: str = "artifacts/data/raw/raw_data.csv"
-    processed_data_dir: str = "artifacts/data/transformed"
-    train_path: str = "artifacts/data/transformed/train.csv"
-    test_path: str = "artifacts/data/transformed/test.csv"
-        # Split settings
-    test_size: float = 0.2
-    random_state: int = 6
+from src.constants.config import DataTransformationConfig
 
 
 
 
 class Data_FE_Transformation:
-    def __init__(self, config: Optional[Data_transformation] = None):
-        self.config = config or Data_transformation()
+    def __init__(self, config: Optional[DataTransformationConfig] = None):
+        self.config = config or DataTransformationConfig()
 
 
     def create_transaction_amount_features(self,df) -> pd.DataFrame:
@@ -654,26 +653,43 @@ class Data_FE_Transformation:
 
 
 
-    def preprocessor(self,raw_data):
-        logger.info("Starting feature engineering & preprocessing...")
-        df = raw_data
+    def preprocessor(self, raw_data):
+        """
+        Preprocess feature-engineered data: train/test split, encoding, and PCA on V columns.
         
+        Args:
+            raw_data: Feature-engineered DataFrame with target column 'isFraud'
+            
+        Returns:
+            Tuple of (Train_transformed, Test_transformed) DataFrames with target column included
+        """
+        logger.info("Starting preprocessing (train/test split, encoding, PCA)...")
+        df = raw_data.copy()
+        
+        # Separate features and target
         y = df['isFraud']
         X = df.drop('isFraud', axis=1)
 
+        # Train/test split
         X_train, X_test, y_train, y_test = train_test_split(
-            X, y, test_size=self.Data_transformation.test_size, shuffle=True, random_state=self.Data_transformation.random_state
+            X, y, 
+            test_size=self.config.test_size, 
+            shuffle=True, 
+            random_state=self.config.random_state,
+            stratify=y  # Maintain class balance
         )
+        
+        logger.info(f"Train set: {X_train.shape}, Test set: {X_test.shape}")
+        logger.info(f"Train fraud rate: {y_train.mean():.4f}, Test fraud rate: {y_test.mean():.4f}")
 
+        # Identify column types
         cat_cols = X_train.select_dtypes(include=['object', 'category']).columns.tolist()
-        
-        # V columns selection
         v_cols = [c for c in X_train.columns if c.startswith('V')]
-        
-        # Numerical columns (Exclude V columns)
         num_cols = [c for c in X_train.select_dtypes(include=np.number).columns.tolist() if c not in v_cols]
         
-        # Transformers
+        logger.info(f"Categorical columns: {len(cat_cols)}, Numerical columns: {len(num_cols)}, V columns: {len(v_cols)}")
+        
+        # Define transformers
         num_transformer = SimpleImputer(strategy='constant', fill_value=-999)
         
         cat_transformer = OrdinalEncoder(
@@ -688,28 +704,36 @@ class Data_FE_Transformation:
             PCA(n_components=0.96, svd_solver='full')
         )
 
+        # Build column transformer
         preprocessor = ColumnTransformer(
             transformers=[
                 ('num', num_transformer, num_cols),
                 ('cat', cat_transformer, cat_cols),
                 ('pca', v_pca, v_cols)
             ],
-            remainder='drop', # Changed to drop to be safe, or 'passthrough' if you are sure
+            remainder='drop',
             verbose_feature_names_out=False
         ).set_output(transform="pandas")
         
 
-        # Fit on Train only
+        # Fit on Train only (prevent data leakage)
         X_train_processed = preprocessor.fit_transform(X_train)
-        X_train_processed['isFraud'] = y_train
-
-        # using only transform to avoide data leakage
-        X_test_processed = preprocessor.transform(X_test)
-        X_test_processed['isFraud'] = y_test
         
-        print(f"Preprocessing complete! Train shape: {X_train_processed.shape}")
+        # Transform Test using fitted preprocessor
+        X_test_processed = preprocessor.transform(X_test)
+        
+        # Add target column back (reset index to align properly)
+        X_train_processed = X_train_processed.reset_index(drop=True)
+        X_test_processed = X_test_processed.reset_index(drop=True)
+        
+        X_train_processed['isFraud'] = y_train.reset_index(drop=True)
+        X_test_processed['isFraud'] = y_test.reset_index(drop=True)
+        
+        logger.info(f"✓ Preprocessing complete!")
+        logger.info(f"  Train shape: {X_train_processed.shape}")
+        logger.info(f"  Test shape: {X_test_processed.shape}")
 
-        return Train_tranformed, Test_tranformed
+        return X_train_processed, X_test_processed
 
 
 
@@ -748,6 +772,29 @@ class Data_FE_Transformation:
             except Exception as e:
                 logger.error(f"Failed to read raw data: {str(e)}")
                 raise CustomException(e, sys)
+            
+            # Step 1.5: Compare raw_data schema with schema.yaml
+            logger.info("Step 1.5: Validating raw_data schema against schema.yaml...")
+            schema_yaml_path = "src/constants/schema.yaml"
+            try:
+                schema_result = Read_write_yaml_schema.compare_schema(
+                    df=df,
+                    schema_name="raw_data",
+                    schema_yaml_filepath=schema_yaml_path,
+                    strict=False  # Set to True to fail on schema mismatch
+                )
+                if schema_result['match']:
+                    logger.info("✓ Raw data schema validation passed")
+                else:
+                    logger.warning(f"⚠ Schema differences detected - proceeding with caution")
+                    if schema_result['missing_columns']:
+                        logger.warning(f"  Missing columns: {len(schema_result['missing_columns'])}")
+                    if schema_result['extra_columns']:
+                        logger.warning(f"  Extra columns: {len(schema_result['extra_columns'])}")
+            except FileNotFoundError:
+                logger.warning("Schema file not found - skipping schema validation (first run?)")
+            except ValueError as e:
+                logger.warning(f"Schema 'raw_data' not found - skipping validation: {str(e)}")
             
             # Step 2: Transaction Amount Features
             logger.info("Step 2: Applying create_transaction_amount_features()...")
@@ -884,11 +931,37 @@ class Data_FE_Transformation:
                 if Test_transformed is not None:
                     output_path2 = os.path.join(self.config.processed_data_dir, "Test_transformed.csv")
                     Test_transformed.to_csv(output_path2, index=False)
+                    
                     logger.info(f"✓ Test data saved to: {output_path2}")
 
             except Exception as e:
                 logger.error(f"Failed to save transformed data: {str(e)}")
                 raise CustomException(e, sys)
+            
+            # Step 16: Save preprocessed schema to schema.yaml
+            logger.info("Step 16: Saving preprocessed data schema to schema.yaml...")
+            try:
+                schema_yaml_path = "src/constants/schema.yaml"
+                
+                # Save Train_transformed schema
+                Read_write_yaml_schema.save_dataframe_schema(
+                    df=Train_transformed,
+                    schema_name="preprocessed_train",
+                    schema_yaml_filepath=schema_yaml_path
+                )
+                logger.info("✓ Train preprocessed schema saved to schema.yaml")
+                
+                # Save Test_transformed schema (if exists)
+                if Test_transformed is not None:
+                    Read_write_yaml_schema.save_dataframe_schema(
+                        df=Test_transformed,
+                        schema_name="preprocessed_test",
+                        schema_yaml_filepath=schema_yaml_path
+                    )
+                    logger.info("✓ Test preprocessed schema saved to schema.yaml")
+                    
+            except Exception as e:
+                logger.warning(f"Failed to save preprocessed schema (non-critical): {str(e)}")
             
             logger.info("=" * 60)
             logger.info(f"FEATURE ENGINEERING COMPLETED SUCCESSFULLY!")
@@ -920,7 +993,7 @@ def main():
     logger.info("Initializing Feature Engineering Pipeline...")
     
     # Create config and run transformation
-    config = Data_transformation()
+    config = DataTransformationConfig()
     transformer = Data_FE_Transformation(config)
     transformer.RUN()
 

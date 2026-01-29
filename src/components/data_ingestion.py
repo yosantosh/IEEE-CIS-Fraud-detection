@@ -11,7 +11,6 @@ Usage with DVC:
 import os
 import sys
 from pathlib import Path
-from dataclasses import dataclass
 from typing import Optional, Tuple
 
 import pandas as pd
@@ -21,29 +20,7 @@ from src.logger import logger
 from src.exception import CustomException, DataIngestionException
 from src.utils import Read_write_yaml_schema
 from src.utils.fetch_data import Fetch_data
-
-
-# ============================================================================
-# CONFIGURATION
-# ============================================================================
-
-@dataclass
-class DataIngestionConfig:
-    """Configuration for data ingestion paths."""
-    # Paths
-    raw_data_dir: str = "artifacts/data/raw"
-    processed_data_dir: str = "artifacts/data/processed"
-    raw_data_path: str = "artifacts/data/raw/raw_data.csv"
-    
-    # Row limit for reading data (None = read all rows, set to int for sampling)
-    # Useful for development/testing with large datasets
-    nrows: Optional[int] = 1000  # e.g., 10000 for quick testing, None for full dataset
-    
-    # S3 settings (from environment variables)
-    bucket_name: str = os.getenv("S3_BUCKET_NAME", "mlops-capstone-project-final")
-    transaction_key: str = "train_transaction.csv"
-    identity_key: str = "train_identity.csv"
-    aws_region: str = os.getenv("AWS_DEFAULT_REGION", "us-east-1")
+from src.constants.config import DataIngestionConfig
 
 
 # ============================================================================
@@ -178,6 +155,17 @@ class DataIngestion:
             merged_df.to_csv(self.config.raw_data_path, index=False)
             
             logger.info(f"DATA HAS BEEN SAVED AT {self.config.raw_data_path}")
+            
+            # Step 3: Save raw_data schema to schema.yaml
+            logger.info("Saving raw_data schema to schema.yaml...")
+            schema_yaml_path = "src/constants/schema.yaml"
+            Read_write_yaml_schema.save_dataframe_schema(
+                df=merged_df,
+                schema_name="raw_data",
+                schema_yaml_filepath=schema_yaml_path
+            )
+            logger.info(f"✓ Raw data schema saved to {schema_yaml_path}")
+            
             logger.info("=" * 60)
             logger.info("DATA INGESTION COMPLETED SUCCESSFULLY")
             logger.info("=" * 60)

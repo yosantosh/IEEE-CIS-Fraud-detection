@@ -6,6 +6,16 @@ data_ingestion:
   test_size: 0.1
   random_state: 6
 
+model_training:
+  test_size: 0.13
+  random_state: 6
+  target_column: "isFraud"
+
+mlflow:
+  experiment_name: "IEEE-CIS-Fraud-Detection"
+  tracking_uri: "mlruns"
+  log_models: true
+
 model_params:
   XGBClassifier:
     objective: binary:logistic
@@ -21,9 +31,9 @@ model_params:
     colsample_bytree: 0.7
     reg_alpha: 1
     reg_lambda: 2
-    early_stopping_rounds: 80  
-
+    early_stopping_rounds: 80
 
 raw_data_cols:
   len: 
   features: 
+

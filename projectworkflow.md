@@ -363,6 +363,12 @@ dvc init
 # Add data to DVC tracking
 dvc add <path>                    # e.g., dvc add artifacts/
 
+
+#auto add dvc.lock and other files into git so that we dont have to add them manuallu using git add dvc.lock
+
+dvc config core.autostage true
+
+
 # Remote management
 dvc remote add -d <name> <url>    # Add remote storage
 dvc remote list                   # List all remotes
@@ -440,11 +446,11 @@ AWS_SECRET_ACCESS_KEY: __________________________
       
       - integrate mlflow in training loop, autolog whould be better
       - save the model in models/  directory
-      - dvc add models/
-      - git add models.dvc  ( model.dvc created by dvc in effect of upper command)
+      - dvc add models : no need to do this becasue dvc.yaml file already tracking the output which is ofcourse save model at models/
+      - git add models.dvc  ( model.dvc created by dvc in effect of upper command)   : no need to do this
 
 
-      - add staging for model_training.py in dvc.yaml
+      - add: staging for model_training.py in dvc.yaml
       - dvc repro (to run the pipeline)
       - dvc push( push the model to s3)
 

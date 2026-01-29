@@ -1,0 +1,11 @@
+{
+  "train_roc_auc": 1.0,
+  "train_f1_score": 0.9976470588235294,
+  "train_precision": 0.9953051643192489,
+  "train_recall": 1.0,
+  "test_roc_auc": 0.9177447645628011,
+  "test_f1_score": 0.6206896551724138,
+  "test_precision": 0.7941176470588235,
+  "test_recall": 0.5094339622641509,
+  "test_accuracy": 0.9835
+}

@@ -22,41 +22,43 @@ stages:
           - data_ingestion.source_type
 
   # --------------------------------------------------------
-  # Stage 2: Data Transformation (placeholder)
+  # Stage 2: Data Transformation and Feature Engineering
   # --------------------------------------------------------
   data_transformation_Feature_engineering:
     cmd: python -m src.components.data_FE_transformation
     deps:
       - src/components/data_FE_transformation.py
-      - src/components/data_ingestion.py
+      - src/constants/config.py
       - artifacts/data/raw/raw_data.csv
     outs:
       - artifacts/data/transformed/Train_transformed.csv
+      - artifacts/data/transformed/Test_transformed.csv
+
+
 
   # --------------------------------------------------------
-  # Stage 3: Feature Engineering (placeholder)
+  # Stage 3: Model Training & Evaluation
   # --------------------------------------------------------
-  # feature_engineering:
-  #   cmd: python -m src.features.feature_engineering
-  #   deps:
-  #     - src/features/feature_engineering.py
-  #     - artifacts/data/transformed/train_transformed.csv
-  #   outs:
-  #     - artifacts/features/train_features.csv
-
-  # --------------------------------------------------------
-  # Stage 4: Model Training (placeholder)
-  # --------------------------------------------------------
-  # model_training:
-  #   cmd: python -m src.models.train
-  #   deps:
-  #     - src/models/train.py
-  #     - artifacts/features/train_features.csv
-  #   outs:
-  #     - artifacts/models/model.pkl
-  #   metrics:
-  #     - artifacts/metrics/metrics.json:
-  #         cache: false
+  model_training:
+    cmd: python -m src.components.model_training_evaluation
+    deps:
+      - src/components/model_training_evaluation.py
+      - src/constants/config.py
+      - src/constants/params.yaml
+      - artifacts/data/transformed/Train_transformed.csv
+      - artifacts/data/transformed/Test_transformed.csv
+    params:
+      - src/constants/params.yaml:
+          - model_params.XGBClassifier
+          - model_training
+    outs:
+      - models/XGBClassifier_latest.joblib
+    metrics:
+      - models/metrics.json:
+          cache: false
+    plots:
+      - models/confusion_matrix.png:
+          cache: false
 
   # --------------------------------------------------------
   # Stage 5: Model Evaluation (placeholder)
