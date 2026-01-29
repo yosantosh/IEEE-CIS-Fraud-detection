@@ -57,14 +57,6 @@
 
 
 
-13. Also Tracking data in our local system later will do on aws s3 so, : "pip install dvc" & "dvc init"
-14. create a new local_s3 folder for dvc, on root dir
-15  Initialize that local_s3 for dvc : "dvc remote add -d local_system local_s3"
-16. Add local_s3 in .gitignore
-
-17. git should track the dvc data id or pointers so : "git add .dvc .dvcignore"  && "git commit -m "Initialize DVC" && "git push origain main"
-
-
 
 
 ==============================================================================================
@@ -97,7 +89,7 @@ This section explains how to:
 │           ▼                                                                              │
 │   ┌─────────────────┐                     ┌─────────────────┐                           │
 │   │ dvc.lock        │ ──── git push ────► │    GitHub       │                           │
-│   │ .dvc files      │ ◄─── git pull ───── │  (small files)  │                           │
+│   │ .dvc     │ ◄─── git pull ───── │  (small files)  │                           │
 │   │ dvc.yaml        │                     │                 │                           │
 │   └─────────────────┘                     └─────────────────┘                           │
 │                                                                                          │
@@ -160,12 +152,30 @@ dvc add artifacts
 
 
 
+Since we already added artifact/raw/raw_data.py   and artifacts/transformed. .csv files as output for each staging, so dvc track thsese files and push to remote storage. 
+
+DVC just monitor dependencies to detect change so that if we rerun pipeline then it will detect oooh this stage component get changed so we need to run it again.
+
+
+
+
+
+data_ingestion:
+  deps:                                    # ❌ NOT pushed to S3
+    - src/components/data_ingestion.py     # Just monitored
+    - src/utils/fetch_data.py              # Just monitored
+    - config/config.yaml                   # Just monitored
+  outs:                                    # ✅ PUSHED to S3
+    - artifacts/data/raw/raw_data.csv      # Cached & pushed
+
+
+
 ---------------------- STEP 3: Configure AWS S3 as Remote Storage ----------------------
 
 # Create an S3 bucket on AWS Console first, then:
 
-# Add S3 as a DVC remote (replace with your bucket details)
-dvc remote add -d myremote s3://YOUR_BUCKET_NAME/dvc-store
+# Add S3 as a DVC remote (S3 uri)   ; -d means default
+dvc remote add S3REMOTE -d s3://mlops-capstone-project-final/artifacts/
 
 # Example:
 # dvc remote add -d myremote s3://ieee-fraud-detection-artifacts/dvc-store
@@ -201,9 +211,9 @@ aws configure
 # DVC automatically uses these credentials
 
 
-METHOD 2: Using Environment Variables
+METHOD 2: Using Environment Variables  : im choosig this method
 ─────────────────────────────────────
-# Add to your .env file or export in terminal:
+#export in terminal:
 export AWS_ACCESS_KEY_ID=your_access_key
 export AWS_SECRET_ACCESS_KEY=your_secret_key
 export AWS_DEFAULT_REGION=us-east-1
@@ -233,7 +243,7 @@ dvc push
 # - All files from .dvc/cache to S3
 # - Uses the hash as the filename in S3
 
-# To push specific files only:
+# To push specific files only:   we are tracking using piepline dvc.yaml so not gonnna do this
 dvc push artifacts.dvc
 
 # Verify upload (optional - check S3 console or use AWS CLI):
@@ -329,7 +339,7 @@ YOUR PROJECT STRUCTURE WITH DVC:
 IEEE-CIS-Fraud-detection/
 ├── .dvc/
 │   ├── config              # Remote storage settings (COMMIT TO GIT)
-│   ├── config.local        # Local credentials (DO NOT COMMIT - in .gitignore)
+│   ├── config.local        # Local credentials (DO NOT COMMIT - add in .gitignore)
 │   ├── cache/              # Local cache of tracked files (DO NOT COMMIT)
 │   └── .gitignore          # DVC's internal gitignore
 ├── artifacts/              # Your large data (TRACKED BY DVC, NOT GIT)
@@ -413,3 +423,34 @@ AWS_SECRET_ACCESS_KEY: __________________________
 ==============================================================================================
                               END OF DVC + S3 TUTORIAL
 ==============================================================================================
+
+
+
+
+==============================================================================================
+                              Model training component + mlflow (experiment tracking) + track saved model by DVC & push to s3
+==============================================================================================
+
+
+1. Code the model_training.py
+    strategy: 
+      - check schema output by data_FE_transformation.py ; save schema in schema.yaml as last step in data_FE_t..py stage, then compare while loading data from artifact/transformed
+
+      - model training with preprocessed data set and by using model parameters listed on constants/params.yaml file.
+      
+      - integrate mlflow in training loop, autolog whould be better
+      - save the model in models/  directory
+      - dvc add models/
+      - git add models.dvc  ( model.dvc created by dvc in effect of upper command)
+
+
+      - add staging for model_training.py in dvc.yaml
+      - dvc repro (to run the pipeline)
+      - dvc push( push the model to s3)
+
+      - retrain model applied pca on full data set, most probabity it will ruine mutliple features but this is just for experiment.
+
+      - lets code
+
+
+
