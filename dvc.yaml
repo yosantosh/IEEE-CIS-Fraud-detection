@@ -14,6 +14,7 @@ stages:
       - src/components/data_ingestion.py
       - src/utils/fetch_data.py
       - config/config.yaml
+      - src/constants/schema.yaml
     outs:
       - artifacts/data/raw/raw_data.csv
 
@@ -30,6 +31,7 @@ stages:
       - src/components/data_FE_transformation.py
       - src/constants/config.py
       - artifacts/data/raw/raw_data.csv
+      - src/constants/schema.yaml
     outs:
       - artifacts/data/transformed/Train_transformed.csv
       - artifacts/data/transformed/Test_transformed.csv
@@ -45,6 +47,7 @@ stages:
       - src/components/model_training_evaluation.py
       - src/constants/config.py
       - src/constants/params.yaml
+      - src/constants/schema.yaml
       - artifacts/data/transformed/Train_transformed.csv
       - artifacts/data/transformed/Test_transformed.csv
     params:

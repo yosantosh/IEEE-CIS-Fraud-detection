@@ -1,1 +1,5 @@
-/XGBClassifier_latest.joblib
+# Ignore all .joblib files (versioned models like XGBClassifier_v1.joblib, v2, etc.)
+*.joblib
+
+# BUT track XGBClassifier_latest.joblib (DVC pipeline output)
+!XGBClassifier_latest.joblib

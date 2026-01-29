@@ -773,7 +773,7 @@ class Data_FE_Transformation:
                 logger.error(f"Failed to read raw data: {str(e)}")
                 raise CustomException(e, sys)
             
-            # Step 1.5: Compare raw_data schema with schema.yaml
+            # Step 1.5: Compare raw_data schema with schema.yaml (STRICT VALIDATION!)
             logger.info("Step 1.5: Validating raw_data schema against schema.yaml...")
             schema_yaml_path = "src/constants/schema.yaml"
             try:
@@ -781,20 +781,16 @@ class Data_FE_Transformation:
                     df=df,
                     schema_name="raw_data",
                     schema_yaml_filepath=schema_yaml_path,
-                    strict=False  # Set to True to fail on schema mismatch
+                    strict=True  # STRICT MODE - fail on schema mismatch!
                 )
-                if schema_result['match']:
-                    logger.info("✓ Raw data schema validation passed")
-                else:
-                    logger.warning(f"⚠ Schema differences detected - proceeding with caution")
-                    if schema_result['missing_columns']:
-                        logger.warning(f"  Missing columns: {len(schema_result['missing_columns'])}")
-                    if schema_result['extra_columns']:
-                        logger.warning(f"  Extra columns: {len(schema_result['extra_columns'])}")
+                logger.info("✓ Raw data schema validation PASSED")
             except FileNotFoundError:
                 logger.warning("Schema file not found - skipping schema validation (first run?)")
             except ValueError as e:
-                logger.warning(f"Schema 'raw_data' not found - skipping validation: {str(e)}")
+                logger.warning(f"Schema 'raw_data' not found - skipping validation (first run?): {str(e)}")
+            except Exception as e:
+                logger.error(f"Schema validation FAILED: {str(e)}")
+                raise CustomException(e, sys)
             
             # Step 2: Transaction Amount Features
             logger.info("Step 2: Applying create_transaction_amount_features()...")

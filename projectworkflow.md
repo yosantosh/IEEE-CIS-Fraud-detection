@@ -1,462 +1,566 @@
----------------------- setting up project structure ------------
+# IEEE-CIS Fraud Detection - Complete Project Workflow
+## From Setup to Model Training Pipeline
 
-1. create a virtual environment named 'atlas' : conda create -n atlas python=3.10
-2. Activate the atlas env : conda activate atlas
-3. pip install cookiecutter : to build project structure, the have multiple templetes on github i guess
-   so it just create files and build project struture.
-4. "cookiecutter -c v1 https://github.com/drivendata/cookiecutter-data-science" : to copy the templete (skip aws things we will setup this manually)
-5. cut all files from newly created and past on root folder
-6. rename src.models to src.model becasue we already have model in root so its like just to make the mind clear.
-7. git push origin main
+This document explains the complete step-by-step workflow for building the IEEE-CIS Fraud Detection MLOps pipeline.
 
+---
 
----------------------- setup MLflow on dagshub-------------
+# 📋 TABLE OF CONTENTS
 
-8. Go to: https://dagshub.com/dashboard
-9. Create > New Repo > Connect a repo > (Github) Connect > Select your repo > Connect
-10. Copy experiment tracking url and code snippet. (Also try: Go To MLFlow UI)
-11. pip install dagshub && pip install mlflow
+1. [Phase 1: Project Setup](#phase-1-project-setup)
+2. [Phase 2: MLflow + DagsHub Setup](#phase-2-mlflow--dagshub-setup)
+3. [Phase 3: Building src Components](#phase-3-building-src-components)
+4. [Phase 4: DVC + S3 Remote Storage](#phase-4-dvc--s3-remote-storage)
+5. [Phase 5: Data Ingestion Component](#phase-5-data-ingestion-component)
+6. [Phase 6: Feature Engineering Component](#phase-6-feature-engineering-component)
+7. [Phase 7: Model Training Component](#phase-7-model-training-component)
+8. [Quick Reference Commands](#quick-reference-commands)
 
-12. Now tracking experiment with 3 models in a loop using MLfow and dagsub,  file: exp1.ipynb
+---
 
+# PHASE 1: PROJECT SETUP
+## Setting up the project structure
 
+### Steps:
 
+1. **Create virtual environment**
+   ```bash
+   conda create -n mlops python=3.10
+   conda activate mlops
+   ```
 
+2. **Install cookiecutter** (for project structure templates)
+   ```bash
+   pip install cookiecutter
+   ```
 
+3. **Create project structure from template**
+   ```bash
+   cookiecutter -c v1 https://github.com/drivendata/cookiecutter-data-science
+   ```
+   > Skip AWS things during setup, we'll configure manually later
 
--------------------------------- Building src components--------------------------
+4. **Organize files**
+   - Cut all files from newly created folder and paste in root
+   - Rename `src.models` to `src.model` to avoid confusion with `models/` folder
 
-1. Logging ------------------> 
-   
-   1.Write logger module : ok so we need a logger module so that we can save the logs for important steps in the whole project. 
-   so to make the module(will be able to import on different folders):
+5. **Initial Git push**
+   ```bash
+   git init
+   git add .
+   git commit -m "Initial project structure"
+   git push origin main
+   ```
 
-   2. ---> create logger foler inside the src directory, then create __init__.py and write the code in this file
-   3.---> best practice dont run the logged() in the last in __init__.py instead run the module where you are exporting it
+---
 
+# PHASE 2: MLFLOW + DAGSHUB SETUP
+## Setting up experiment tracking
 
+### Steps:
 
-2. local packages ------------>
-   
-   --install packages listed in requirement.txt, also
-   --add e .  in the same file so that it will also install the local packages
-   --install: pip install -r requirement.txt     or       "pip install -e ." to install local package  
+1. **Go to DagsHub Dashboard**: https://dagshub.com/dashboard
 
+2. **Create & Connect Repository**
+   - Create > New Repo > Connect a repo > (GitHub) Connect
+   - Select your repo > Connect
 
+3. **Copy experiment tracking credentials**
+   - Copy the MLflow URI and code snippet
+   - Try: Go To MLFlow UI to verify
 
+4. **Install required packages**
+   ```bash
+   pip install dagshub mlflow
+   ```
 
+5. **Test experiment tracking** (in `notebooks/exp1.ipynb`)
+   - Track 3 models (XGBoost, CatBoost, LightGBM) using MLflow + DagsHub
 
+### DagsHub Integration Code:
+```python
+import dagshub
+import mlflow
 
+dagshub.init(
+    repo_owner='santosh4thmarch', 
+    repo_name='IEEE-CIS-Fraud-detection', 
+    mlflow=True
+)
+mlflow.set_tracking_uri('https://dagshub.com/santosh4thmarch/IEEE-CIS-Fraud-detection.mlflow')
+```
 
+---
 
+# PHASE 3: BUILDING SRC COMPONENTS
+## Creating reusable modules
 
+### 3.1 Logger Module
 
+**Purpose**: Save logs for important steps throughout the project.
 
+**Steps**:
+1. Create `src/logger/` directory
+2. Create `__init__.py` inside logger folder
+3. Write logging configuration code
 
+**Best Practice**: Don't run `logger()` at the end of `__init__.py`. Instead, import and run it where you're using it.
 
+**Usage**:
+```python
+from src.logger import logger
+logger.info("Data ingestion started")
+```
 
+### 3.2 Exception Module
 
+**Purpose**: Custom exception handling for better error messages.
 
+**Location**: `src/exception/__init__.py`
 
+**Usage**:
+```python
+from src.exception import CustomException
+raise CustomException(e, sys)
+```
 
-==============================================================================================
-                    DVC + S3 REMOTE STORAGE + GIT TRACKING TUTORIAL
-==============================================================================================
+### 3.3 Utils Module
 
-This section explains how to:
-1. Track your artifacts folder with DVC
-2. Push large files to AWS S3 (instead of Git)
-3. Properly integrate DVC with Git/GitHub
+**Purpose**: Utility functions used across components.
 
-==============================================================================================
+**Location**: `src/utils/__init__.py`
 
+**Key Functions**:
+- `Read_write_yaml_schema.read_yaml()` - Read YAML configurations
+- `Read_write_yaml_schema.save_dataframe_schema()` - Save DataFrame schema to YAML
+- `Read_write_yaml_schema.compare_schema()` - Compare DataFrame against saved schema
+- `reduce_memory()` - Reduce DataFrame memory usage
 
----------------------- UNDERSTANDING: How DVC + Git Work Together ----------------------
+### 3.4 Local Package Installation
 
-┌─────────────────────────────────────────────────────────────────────────────────────────┐
-│                         THE BIG PICTURE                                                  │
-├─────────────────────────────────────────────────────────────────────────────────────────┤
-│                                                                                          │
-│   YOUR LOCAL MACHINE                      REMOTE STORAGE                                 │
-│   ─────────────────                       ──────────────                                 │
-│                                                                                          │
-│   ┌─────────────────┐                     ┌─────────────────┐                           │
-│   │ artifacts/      │ ──── dvc push ────► │  AWS S3 Bucket  │                           │
-│   │ (large files)   │ ◄─── dvc pull ───── │  (large files)  │                           │
-│   └─────────────────┘                     └─────────────────┘                           │
-│           │                                                                              │
-│           │ DVC tracks hashes                                                            │
-│           ▼                                                                              │
-│   ┌─────────────────┐                     ┌─────────────────┐                           │
-│   │ dvc.lock        │ ──── git push ────► │    GitHub       │                           │
-│   │ .dvc     │ ◄─── git pull ───── │  (small files)  │                           │
-│   │ dvc.yaml        │                     │                 │                           │
-│   └─────────────────┘                     └─────────────────┘                           │
-│                                                                                          │
-└─────────────────────────────────────────────────────────────────────────────────────────┘
+**Steps**:
+1. List packages in `requirements.txt`
+2. Add `-e .` at the end of requirements.txt (installs local packages)
+3. Install:
+   ```bash
+   pip install -r requirements.txt
+   # OR
+   pip install -e .
+   ```
 
+---
 
-WHAT GETS TRACKED WHERE?
-─────────────────────────
+# PHASE 4: DVC + S3 REMOTE STORAGE
+## Data Version Control with AWS S3
 
-| Track with GIT (small files)           | Track with DVC (large files)              |
-|----------------------------------------|-------------------------------------------|
-| ✓ dvc.yaml (pipeline definition)       | ✓ artifacts/ folder (CSVs, models, etc.)  |
-| ✓ dvc.lock (file hashes & versions)    | ✓ Any file > 100MB                        |
-| ✓ .dvc/config (remote settings)        | ✓ Training data, processed data           |
-| ✓ *.dvc files (pointers to large data) | ✓ Model weights, checkpoints              |
-| ✓ .dvcignore                           |                                           |
+### Understanding DVC + Git
 
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         THE BIG PICTURE                                      │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│   YOUR LOCAL MACHINE                      REMOTE STORAGE                     │
+│   ─────────────────                       ──────────────                     │
+│                                                                              │
+│   ┌─────────────────┐                     ┌─────────────────┐               │
+│   │ artifacts/      │ ──── dvc push ────► │  AWS S3 Bucket  │               │
+│   │ models/         │ ◄─── dvc pull ───── │  (large files)  │               │
+│   └─────────────────┘                     └─────────────────┘               │
+│           │                                                                  │
+│           │ DVC tracks hashes                                                │
+│           ▼                                                                  │
+│   ┌─────────────────┐                     ┌─────────────────┐               │
+│   │ dvc.lock        │ ──── git push ────► │    GitHub       │               │
+│   │ dvc.yaml        │ ◄─── git pull ───── │  (code + refs)  │               │
+│   └─────────────────┘                     └─────────────────┘               │
+│                                                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
 
-KEY INSIGHT: 
-─────────────
-Git stores the "address" (hash/pointer) of your large files.
-DVC stores the actual large files on remote storage (S3).
-When someone clones your repo, they get the pointers from Git, 
-then run `dvc pull` to download the actual files from S3.
+### What Gets Tracked Where?
 
+| Git (small files) | DVC (large files) |
+|-------------------|-------------------|
+| dvc.yaml (pipeline) | artifacts/ folder |
+| dvc.lock (hashes) | models/ folder |
+| .dvc/config | CSVs, model weights |
+| Code files | Training data |
 
+### Step-by-Step DVC Setup
 
----------------------- STEP 1: Install DVC with S3 Support ----------------------
-
-# Install DVC with S3 dependencies
+#### Step 1: Install DVC with S3 Support
+```bash
 pip install dvc[s3]
-
-# Verify installation
-dvc --version
-
-# If DVC was already initialized (you have .dvc folder), skip to Step 2
-# Otherwise initialize DVC:
 dvc init
+```
 
-
-
----------------------- STEP 2: Add artifacts Folder to DVC Tracking ----------------------
-
-# Navigate to your project root
-cd /home/pluto/Desktop/IEEE-CIS-Fraud-detection
-
-# Add the entire artifacts folder to DVC tracking
-dvc add artifacts
-
-# This creates two things:
-# 1. artifacts.dvc       → A small text file (pointer) that Git will track
-# 2. artifacts/.gitignore  → Tells Git to ignore the actual files inside artifacts/
-
-# WHAT HAPPENS INTERNALLY:
-# ─────────────────────────
-# DVC calculates a unique hash (MD5) of all files in artifacts/
-# This hash is stored in artifacts.dvc
-# The actual files are moved to .dvc/cache (local cache)
-# A symbolic link or copy is placed back in artifacts/
-
-
-
-Since we already added artifact/raw/raw_data.py   and artifacts/transformed. .csv files as output for each staging, so dvc track thsese files and push to remote storage. 
-
-DVC just monitor dependencies to detect change so that if we rerun pipeline then it will detect oooh this stage component get changed so we need to run it again.
-
-
-
-
-
-data_ingestion:
-  deps:                                    # ❌ NOT pushed to S3
-    - src/components/data_ingestion.py     # Just monitored
-    - src/utils/fetch_data.py              # Just monitored
-    - config/config.yaml                   # Just monitored
-  outs:                                    # ✅ PUSHED to S3
-    - artifacts/data/raw/raw_data.csv      # Cached & pushed
-
-
-
----------------------- STEP 3: Configure AWS S3 as Remote Storage ----------------------
-
-# Create an S3 bucket on AWS Console first, then:
-
-# Add S3 as a DVC remote (S3 uri)   ; -d means default
+#### Step 2: Configure S3 Remote
+```bash
+# Add S3 bucket as remote storage
 dvc remote add S3REMOTE -d s3://mlops-capstone-project-final/artifacts/
 
-# Example:
-# dvc remote add -d myremote s3://ieee-fraud-detection-artifacts/dvc-store
-
-# The -d flag sets this as the DEFAULT remote
-
-# Verify the remote was added
+# Verify
 dvc remote list
-# Should show: myremote    s3://YOUR_BUCKET_NAME/dvc-store
+```
 
-
-
----------------------- STEP 4: Configure AWS Credentials for DVC ----------------------
-
-There are 3 ways to provide AWS credentials to DVC:
-
-
-METHOD 1: Using AWS CLI (Recommended)
-─────────────────────────────────────
-# Install AWS CLI if not installed
-pip install awscli
-
-# Configure AWS credentials
+#### Step 3: Configure AWS Credentials
+```bash
+# Option 1: AWS CLI (Recommended)
 aws configure
 
-# It will prompt for:
-# AWS Access Key ID: YOUR_ACCESS_KEY
-# AWS Secret Access Key: YOUR_SECRET_KEY  
-# Default region name: us-east-1 (or your region)
-# Default output format: json
-
-# Credentials are stored in ~/.aws/credentials
-# DVC automatically uses these credentials
-
-
-METHOD 2: Using Environment Variables  : im choosig this method
-─────────────────────────────────────
-#export in terminal:
+# Option 2: Environment Variables
 export AWS_ACCESS_KEY_ID=your_access_key
 export AWS_SECRET_ACCESS_KEY=your_secret_key
 export AWS_DEFAULT_REGION=us-east-1
+```
 
+#### Step 4: Enable Auto-Staging
+```bash
+dvc config core.autostage true
+```
 
-METHOD 3: Direct DVC Configuration (stores in .dvc/config)
-──────────────────────────────────────────────────────────
-# WARNING: This stores credentials in a file. Be careful with version control!
-dvc remote modify myremote access_key_id YOUR_ACCESS_KEY
-dvc remote modify myremote secret_access_key YOUR_SECRET_KEY
-dvc remote modify myremote region us-east-1
-
-# For security, use --local flag to store credentials locally (not in Git):
-dvc remote modify --local myremote access_key_id YOUR_ACCESS_KEY
-dvc remote modify --local myremote secret_access_key YOUR_SECRET_KEY
-
-# --local stores in .dvc/config.local which should be in .gitignore
-
-
-
----------------------- STEP 5: Push Data to S3 ----------------------
-
-# Push all DVC-tracked files to S3
+#### Step 5: Push/Pull Data
+```bash
+# Push data to S3
 dvc push
 
-# This uploads:
-# - All files from .dvc/cache to S3
-# - Uses the hash as the filename in S3
+# Pull data from S3
+dvc pull
+```
 
-# To push specific files only:   we are tracking using piepline dvc.yaml so not gonnna do this
-dvc push artifacts.dvc
+---
 
-# Verify upload (optional - check S3 console or use AWS CLI):
-aws s3 ls s3://YOUR_BUCKET_NAME/dvc-store/ --recursive
+# PHASE 5: DATA INGESTION COMPONENT
+## Loading and merging raw data
 
+### Location: `src/components/data_ingestion.py`
 
+### What it does:
+1. Fetches data from **AWS S3** (or local source)
+2. Reads `train_transaction.csv` and `train_identity.csv`
+3. Merges both DataFrames on `TransactionID`
+4. Saves merged data to `artifacts/data/raw/raw_data.csv`
+5. Saves schema to `src/constants/schema.yaml`
 
----------------------- STEP 6: Track DVC Files with Git ----------------------
+### Configuration: `src/constants/config.py`
+```python
+@dataclass
+class DataIngestionConfig:
+    raw_data_dir: str = "artifacts/data/raw"
+    raw_data_path: str = "artifacts/data/raw/raw_data.csv"
+    nrows: Optional[int] = 10000  # None for full dataset
+    bucket_name: str = "mlops-capstone-project-final"
+    transaction_key: str = "train_transaction.csv"
+    identity_key: str = "train_identity.csv"
+```
 
-Now you need to commit the DVC pointer files to Git.
+### DVC Pipeline Stage:
+```yaml
+# In dvc.yaml
+data_ingestion:
+  cmd: python -m src.components.data_ingestion --source s3
+  deps:
+    - src/components/data_ingestion.py
+    - src/utils/fetch_data.py
+  outs:
+    - artifacts/data/raw/raw_data.csv
+```
 
-# Add DVC-related files to Git staging
-git add dvc.yaml              # Pipeline definition
-git add dvc.lock              # Pipeline state (hashes of inputs/outputs)
-git add artifacts.dvc         # Pointer to artifacts folder (created by dvc add)
-git add .dvc/config           # Remote storage configuration
-git add .dvc/.gitignore       # DVC's internal gitignore
+### Run:
+```bash
+dvc repro data_ingestion
+```
 
-# If you have other .dvc files:
-git add *.dvc
+---
 
-# Commit the changes
-git commit -m "Add DVC tracking for artifacts with S3 remote"
+# PHASE 6: FEATURE ENGINEERING COMPONENT
+## Transforming raw data into features
 
-# Push to GitHub
-git push origin main
+### Location: `src/components/data_FE_transformation.py`
 
+### What it does:
+1. **Validates schema** against `raw_data` in schema.yaml
+2. Creates **transaction amount features** (log, decimal, bins)
+3. Creates **time features** (hour, day, is_night, etc.)
+4. Creates **card features** (card combinations, frequencies)
+5. Creates **email features** (domain, vendor, TLD)
+6. Creates **device features** (type, brand, browser, OS)
+7. Creates **address features** (missing flags, combinations)
+8. Creates **V column features** (aggregations, PCA)
+9. Creates **aggregation features** (frequency counts)
+10. Creates **ID features** (binary flags)
+11. Creates **UID features** (unique identifiers)
+12. **Preprocesses data** (train/test split, encoding, PCA)
+13. Saves **Train_transformed.csv** and **Test_transformed.csv**
+14. Saves schemas to `schema.yaml`
 
-OPTIONAL: Enable Auto-Staging
-─────────────────────────────
-# This automatically stages DVC files when you run dvc commands
-dvc config core.autostage true
+### Key Point:
+Both Train and Test files include the **target column `isFraud`** for easy loading in model training.
 
-# After this, you don't need to manually run `git add dvc.lock` 
-# DVC will do it automatically when you run dvc repro, dvc add, etc.
+### Configuration: `src/constants/config.py`
+```python
+@dataclass
+class DataTransformationConfig:
+    raw_data_path: str = "artifacts/data/raw/raw_data.csv"
+    processed_data_dir: str = "artifacts/data/transformed"
+    train_path: str = "artifacts/data/transformed/Train_transformed.csv"
+    test_path: str = "artifacts/data/transformed/Test_transformed.csv"
+    test_size: float = 0.2
+    random_state: int = 6
+```
 
+### DVC Pipeline Stage:
+```yaml
+data_transformation_Feature_engineering:
+  cmd: python -m src.components.data_FE_transformation
+  deps:
+    - src/components/data_FE_transformation.py
+    - artifacts/data/raw/raw_data.csv
+  outs:
+    - artifacts/data/transformed/Train_transformed.csv
+    - artifacts/data/transformed/Test_transformed.csv
+```
 
+### Run:
+```bash
+dvc repro data_transformation_Feature_engineering
+```
 
----------------------- STEP 7: Complete Workflow Example ----------------------
+---
 
-Here's the complete workflow when working on your project:
+# PHASE 7: MODEL TRAINING COMPONENT ✅ COMPLETED
+## Training and evaluating the model
 
+### Location: `src/components/model_training_evaluation.py`
 
-SCENARIO A: You made changes to your pipeline/data
-───────────────────────────────────────────────────
-# 1. Run your pipeline
+### What it does:
+1. **Initializes DagsHub + MLflow** for remote experiment tracking
+2. **Loads model parameters** from `src/constants/params.yaml`
+3. **Loads both** Train_transformed.csv and Test_transformed.csv
+4. **Validates schemas** against schema.yaml
+5. **Trains XGBClassifier** on training data
+6. **Evaluates on both** train and test sets
+7. **Logs to MLflow/DagsHub**:
+   - Parameters
+   - Metrics (accuracy, precision, recall, F1, ROC-AUC)
+   - Model artifacts
+8. **Saves outputs**:
+   - `models/XGBClassifier_latest.joblib` (model)
+   - `models/XGBClassifier_v{N}.joblib` (versioned)
+   - `models/metrics.json` (for DVC tracking)
+   - `models/confusion_matrix.png` (visualization)
+   - `models/XGBClassifier_v{N}_metadata.yaml` (metadata)
+
+### Configuration: `src/constants/config.py`
+```python
+@dataclass
+class ModelTrainingConfig:
+    params_yaml_path: str = "src/constants/params.yaml"
+    schema_yaml_path: str = "src/constants/schema.yaml"
+    train_data_path: str = "artifacts/data/transformed/Train_transformed.csv"
+    test_data_path: str = "artifacts/data/transformed/Test_transformed.csv"
+    model_save_dir: str = "models"
+    experiment_name: str = "exp_1"
+    run_name: str = "XGBClassifier_run"
+    target_column: str = "isFraud"
+```
+
+### Model Parameters: `src/constants/params.yaml`
+```yaml
+model_params:
+  XGBClassifier:
+    objective: binary:logistic
+    eval_metric: auc
+    tree_method: hist
+    device: cuda
+    scale_pos_weight: 27
+    max_depth: 10
+    min_child_weight: 5
+    learning_rate: 0.02
+    n_estimators: 3000
+    subsample: 0.8
+    colsample_bytree: 0.7
+    reg_alpha: 1
+    reg_lambda: 2
+    early_stopping_rounds: 80
+```
+
+### DagsHub + MLflow Integration:
+```python
+import dagshub
+import mlflow
+
+# Initialized at module level
+dagshub.init(
+    repo_owner='santosh4thmarch', 
+    repo_name='IEEE-CIS-Fraud-detection', 
+    mlflow=True
+)
+mlflow.set_tracking_uri('https://dagshub.com/santosh4thmarch/IEEE-CIS-Fraud-detection.mlflow')
+```
+
+### DVC Pipeline Stage:
+```yaml
+model_training:
+  cmd: python -m src.components.model_training_evaluation
+  deps:
+    - src/components/model_training_evaluation.py
+    - src/constants/config.py
+    - src/constants/params.yaml
+    - artifacts/data/transformed/Train_transformed.csv
+    - artifacts/data/transformed/Test_transformed.csv
+  params:
+    - src/constants/params.yaml:
+        - model_params.XGBClassifier
+        - model_training
+  outs:
+    - models/XGBClassifier_latest.joblib
+  metrics:
+    - models/metrics.json:
+        cache: false
+  plots:
+    - models/confusion_matrix.png:
+        cache: false
+```
+
+### Run:
+```bash
+dvc repro model_training
+
+# Push model to S3
+dvc push
+```
+
+### View Experiments:
+- **DagsHub MLflow UI**: https://dagshub.com/santosh4thmarch/IEEE-CIS-Fraud-detection
+- **Local MLflow**: `mlflow ui` (if using local tracking)
+
+---
+
+# QUICK REFERENCE COMMANDS
+
+## DVC Commands
+```bash
+# Run full pipeline
 dvc repro
 
-# 2. DVC automatically updates dvc.lock with new hashes
+# Run specific stage
+dvc repro data_ingestion
+dvc repro data_transformation_Feature_engineering
+dvc repro model_training
 
-# 3. Push updated data to S3
+# Push to S3
 dvc push
 
-# 4. Commit the updated tracking files to Git
-git add dvc.lock
-git commit -m "Update pipeline outputs"
-git push origin main
-
-
-SCENARIO B: Someone clones your repo and wants the data
-───────────────────────────────────────────────────────
-# 1. Clone the repository
-git clone https://github.com/YOUR_USERNAME/IEEE-CIS-Fraud-detection.git
-cd IEEE-CIS-Fraud-detection
-
-# 2. Install dependencies
-pip install -r requirements.txt
-pip install dvc[s3]
-
-# 3. Configure AWS credentials (one of the methods from Step 4)
-aws configure
-
-# 4. Pull the data from S3
+# Pull from S3
 dvc pull
 
-# Now they have all the artifacts!
+# View pipeline DAG
+dvc dag
 
+# Check status
+dvc status
+```
 
-SCENARIO C: You want to reproduce the pipeline from scratch
-──────────────────────────────────────────────────────────
-# Run the entire pipeline
-dvc repro
+## Git + DVC Workflow
+```bash
+# After making changes
+dvc repro                    # Run pipeline
+dvc push                     # Push artifacts to S3
+git add .
+git commit -m "Update pipeline"
+git push origin main
+```
 
-# Or run a specific stage
-dvc repro data_ingestion
+## Environment Setup
+```bash
+# Activate environment
+conda activate mlops
 
+# Set AWS credentials
+export AWS_ACCESS_KEY_ID=your_key
+export AWS_SECRET_ACCESS_KEY=your_secret
+export AWS_DEFAULT_REGION=us-east-1
+```
 
+---
 
----------------------- STEP 8: Important Files Summary ----------------------
+# 📊 PROJECT STRUCTURE
 
-YOUR PROJECT STRUCTURE WITH DVC:
-
+```
 IEEE-CIS-Fraud-detection/
-├── .dvc/
-│   ├── config              # Remote storage settings (COMMIT TO GIT)
-│   ├── config.local        # Local credentials (DO NOT COMMIT - add in .gitignore)
-│   ├── cache/              # Local cache of tracked files (DO NOT COMMIT)
-│   └── .gitignore          # DVC's internal gitignore
-├── artifacts/              # Your large data (TRACKED BY DVC, NOT GIT)
-│   ├── data/
-│   │   ├── raw/
-│   │   ├── processed/
-│   │   └── transformed/
-│   └── .gitignore          # Created by `dvc add`, ignores contents for Git
-├── artifacts.dvc           # Pointer file (COMMIT TO GIT)
-├── dvc.yaml                # Pipeline definition (COMMIT TO GIT)
-├── dvc.lock                # Pipeline state with hashes (COMMIT TO GIT)
-└── .gitignore              # Should include artifacts/ entry
+├── .dvc/                           # DVC configuration
+│   ├── config                      # Remote storage settings
+│   └── cache/                      # Local file cache
+├── artifacts/                      # DVC-tracked data (→ S3)
+│   └── data/
+│       ├── raw/raw_data.csv
+│       └── transformed/
+│           ├── Train_transformed.csv
+│           └── Test_transformed.csv
+├── models/                         # DVC-tracked models (→ S3)
+│   ├── XGBClassifier_latest.joblib
+│   ├── XGBClassifier_v1.joblib
+│   ├── metrics.json
+│   └── confusion_matrix.png
+├── src/
+│   ├── components/
+│   │   ├── data_ingestion.py
+│   │   ├── data_FE_transformation.py
+│   │   └── model_training_evaluation.py
+│   ├── constants/
+│   │   ├── config.py               # Centralized configurations
+│   │   ├── params.yaml             # Model hyperparameters
+│   │   └── schema.yaml             # Data schemas
+│   ├── logger/                     # Logging module
+│   ├── exception/                  # Exception handling
+│   └── utils/                      # Utility functions
+├── dvc.yaml                        # DVC pipeline definition
+├── dvc.lock                        # DVC pipeline state
+├── requirements.txt                # Python dependencies
+└── projectworkflow.md             # This file!
+```
 
+---
 
+# 🎯 CURRENT STATUS
 
----------------------- STEP 9: Common DVC Commands Reference ----------------------
+| Stage | Status | DVC Tracked |
+|-------|--------|-------------|
+| Project Setup | ✅ Complete | - |
+| MLflow/DagsHub Setup | ✅ Complete | - |
+| Logger & Exception | ✅ Complete | - |
+| DVC + S3 Setup | ✅ Complete | ✅ |
+| Data Ingestion | ✅ Complete | ✅ |
+| Feature Engineering | ✅ Complete | ✅ |
+| Model Training | ✅ Complete | ✅ |
+| Model Evaluation | ✅ Complete | ✅ |
+| Model Deployment | 🔄 Next | - |
 
-# Initialize DVC
-dvc init
+---
 
-# Add data to DVC tracking
-dvc add <path>                    # e.g., dvc add artifacts/
+# 📝 NOTES
 
+### Model Not Saving in S3?
+Since `dvc.yaml` already tracks `models/XGBClassifier_latest.joblib` as output, DVC handles the caching automatically. Just run:
+```bash
+dvc repro model_training
+dvc push
+```
 
-#auto add dvc.lock and other files into git so that we dont have to add them manuallu using git add dvc.lock
+### Schema Validation Failing?
+The preprocessed data schemas are auto-generated. If there's a mismatch:
+1. Set `strict_schema_validation: bool = False` in config
+2. Or manually update `schema.yaml`
 
-dvc config core.autostage true
+### Changing Model Parameters?
+1. Edit `src/constants/params.yaml`
+2. Run `dvc repro model_training`
+3. DVC will detect the param change and re-run training
 
+---
 
-# Remote management
-dvc remote add -d <name> <url>    # Add remote storage
-dvc remote list                   # List all remotes
-dvc remote remove <name>          # Remove a remote
-
-# Data synchronization
-dvc push                          # Upload to remote
-dvc pull                          # Download from remote
-dvc fetch                         # Download to cache only (doesn't checkout)
-
-# Pipeline operations
-dvc repro                         # Reproduce entire pipeline
-dvc repro <stage>                 # Reproduce specific stage
-dvc dag                           # Visualize pipeline as DAG
-
-# Status checks
-dvc status                        # Check if data is up to date
-dvc diff                          # Show changes since last commit
-
-# Configuration
-dvc config core.autostage true    # Auto-stage DVC files for Git
-dvc config --list                 # Show all configuration
-
-
-
----------------------- STEP 10: Troubleshooting ----------------------
-
-PROBLEM: "dvc: command not found"
-SOLUTION: pip install dvc[s3] and ensure pip's bin folder is in PATH
-
-PROBLEM: "Unable to access S3 bucket"
-SOLUTION: 
-  - Check AWS credentials are configured: aws configure list
-  - Verify bucket name is correct
-  - Ensure your IAM user has S3 permissions (s3:GetObject, s3:PutObject, s3:ListBucket)
-
-PROBLEM: "dvc push" uploads nothing
-SOLUTION:
-  - Run `dvc status` to check if there are changes
-  - Ensure you ran `dvc add` for new files
-  - Check remote is configured: `dvc remote list`
-
-PROBLEM: Large files still being tracked by Git
-SOLUTION:
-  - Add the path to .gitignore BEFORE running `dvc add`
-  - If already committed: git rm --cached <file>, then dvc add <file>
-
-
-
----------------------- YOUR S3 CREDENTIALS (Fill in before running) ----------------------
-
-BUCKET_NAME:         ____________________________
-AWS_REGION:          ____________________________
-AWS_ACCESS_KEY_ID:   ____________________________
-AWS_SECRET_ACCESS_KEY: __________________________
-
-
-==============================================================================================
-                              END OF DVC + S3 TUTORIAL
-==============================================================================================
-
-
-
-
-==============================================================================================
-                              Model training component + mlflow (experiment tracking) + track saved model by DVC & push to s3
-==============================================================================================
-
-
-1. Code the model_training.py
-    strategy: 
-      - check schema output by data_FE_transformation.py ; save schema in schema.yaml as last step in data_FE_t..py stage, then compare while loading data from artifact/transformed
-
-      - model training with preprocessed data set and by using model parameters listed on constants/params.yaml file.
-      
-      - integrate mlflow in training loop, autolog whould be better
-      - save the model in models/  directory
-      - dvc add models : no need to do this becasue dvc.yaml file already tracking the output which is ofcourse save model at models/
-      - git add models.dvc  ( model.dvc created by dvc in effect of upper command)   : no need to do this
-
-
-      - add: staging for model_training.py in dvc.yaml
-      - dvc repro (to run the pipeline)
-      - dvc push( push the model to s3)
-
-      - retrain model applied pca on full data set, most probabity it will ruine mutliple features but this is just for experiment.
-
-      - lets code
-
-
-
+**Last Updated**: January 29, 2026
+**Author**: Santosh
+**Commit**: Model training component completed with MLflow/DagsHub + S3 integration

@@ -109,6 +109,53 @@ class DataIngestion:
         
         return df_transaction, df_identity
 
+    def validate_input_schemas(self, df_transaction: pd.DataFrame, df_identity: pd.DataFrame) -> bool:
+        """
+        Validate transaction and identity DataFrames against expected schemas.
+        
+        Args:
+            df_transaction: Transaction DataFrame
+            df_identity: Identity DataFrame
+            
+        Returns:
+            True if schemas are valid, raises exception otherwise
+        """
+        logger.info("Validating input data schemas...")
+        schema_yaml_path = "src/constants/schema.yaml"
+        
+        try:
+            # Validate train_transaction schema
+            logger.info("Validating train_transaction schema...")
+            result_transaction = Read_write_yaml_schema.compare_schema(
+                df=df_transaction,
+                schema_name="train_transaction",
+                schema_yaml_filepath=schema_yaml_path,
+                strict=True  # STRICT MODE - fail on mismatch!
+            )
+            logger.info("✓ train_transaction schema validation PASSED")
+            
+            # Validate train_identity schema
+            logger.info("Validating train_identity schema...")
+            result_identity = Read_write_yaml_schema.compare_schema(
+                df=df_identity,
+                schema_name="train_identity",
+                schema_yaml_filepath=schema_yaml_path,
+                strict=True  # STRICT MODE - fail on mismatch!
+            )
+            logger.info("✓ train_identity schema validation PASSED")
+            
+            return True
+            
+        except FileNotFoundError as e:
+            logger.warning(f"Schema file not found - skipping validation (first run?): {e}")
+            return True  # Allow first run without schema file
+        except ValueError as e:
+            logger.warning(f"Schema not defined - skipping validation (first run?): {e}")
+            return True  # Allow first run without schema defined
+        except Exception as e:
+            logger.error(f"Schema validation FAILED: {str(e)}")
+            raise DataIngestionException(e, sys)
+
     def merge_data(self, df_transaction: pd.DataFrame, df_identity: pd.DataFrame) -> pd.DataFrame:
         """Merge transaction and identity datasets on TransactionID."""
         logger.info("Merging datasets on TransactionID...")
@@ -150,7 +197,11 @@ class DataIngestion:
             else:
                 raise ValueError(f"Unknown source: {source}")
             
-            # Step 2: Merge data
+            # Step 2: Validate input schemas BEFORE merging
+            logger.info("Step 2: Validating input data schemas...")
+            self.validate_input_schemas(df_transaction, df_identity)
+            
+            # Step 3: Merge data
             merged_df = self.merge_data(df_transaction, df_identity)
             merged_df.to_csv(self.config.raw_data_path, index=False)
             

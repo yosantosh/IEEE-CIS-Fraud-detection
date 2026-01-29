@@ -28,7 +28,7 @@ class DataIngestionConfig:
     
     # Row limit for reading data (None = read all rows, set to int for sampling)
     # Useful for development/testing with large datasets
-    nrows: Optional[int] = 10000  # e.g., 10000 for quick testing, None for full dataset
+    nrows: Optional[int] = 100000  # e.g., 10000 for quick testing, None for full dataset
     
     # S3 settings (from environment variables)
     bucket_name: str = os.getenv("S3_BUCKET_NAME", "mlops-capstone-project-final")
@@ -87,7 +87,7 @@ class ModelTrainingConfig:
     
     # Schema validation
     schema_name: str = "preprocessed_train"
-    strict_schema_validation: bool = False  # Set True to fail on mismatch
+    strict_schema_validation: bool = True  # STRICT MODE - fail on mismatch!
 
 
 # ============================================================================

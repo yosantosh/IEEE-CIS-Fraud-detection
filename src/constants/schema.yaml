@@ -22,11 +22,11 @@ train_identity:
   id_20: float64
   id_21: float64
   id_22: float64
-  id_23: float64
+  id_23: str
   id_24: float64
   id_25: float64
   id_26: float64
-  id_27: float64
+  id_27: str
   id_28: str
   id_29: str
   id_30: str
@@ -99,7 +99,7 @@ train_transaction:
   dist1: float64
   dist2: float64
   P_emaildomain: str
-  R_emaildomain: float64
+  R_emaildomain: str
   C1: float64
   C2: float64
   C3: float64
@@ -135,9 +135,9 @@ train_transaction:
   M4: str
   M5: str
   M6: str
-  M7: float64
-  M8: float64
-  M9: float64
+  M7: str
+  M8: str
+  M9: str
   V1: float64
   V2: float64
   V3: float64
@@ -1662,6 +1662,19 @@ preprocessed_train:
   pca87: float64
   pca88: float64
   pca89: float64
+  pca90: float64
+  pca91: float64
+  pca92: float64
+  pca93: float64
+  pca94: float64
+  pca95: float64
+  pca96: float64
+  pca97: float64
+  pca98: float64
+  pca99: float64
+  pca100: float64
+  pca101: float64
+  pca102: float64
   isFraud: int64
 preprocessed_test:
   TransactionID: float64
@@ -2019,4 +2032,17 @@ preprocessed_test:
   pca87: float64
   pca88: float64
   pca89: float64
+  pca90: float64
+  pca91: float64
+  pca92: float64
+  pca93: float64
+  pca94: float64
+  pca95: float64
+  pca96: float64
+  pca97: float64
+  pca98: float64
+  pca99: float64
+  pca100: float64
+  pca101: float64
+  pca102: float64
   isFraud: int64
