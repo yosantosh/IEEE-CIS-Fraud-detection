@@ -15,6 +15,14 @@ import joblib
 from pathlib import Path
 from typing import Optional, Dict, Any, Tuple
 
+# Load environment variables from .env FIRST (before any imports that use them)
+from dotenv import load_dotenv
+load_dotenv()
+
+# Set DagsHub token from .env (DagsHub library looks for DAGSHUB_USER_TOKEN)
+if os.getenv('DAGSHUB_TOKEN'):
+    os.environ['DAGSHUB_USER_TOKEN'] = os.getenv('DAGSHUB_TOKEN')
+
 import pandas as pd
 import numpy as np
 import dagshub
@@ -31,25 +39,27 @@ from sklearn.metrics import (
 
 from src.logger import logger
 from src.exception import CustomException
-from src.utils import Read_write_yaml_schema, compare_schema_for_model_training, S3ModelUploader
-from src.constants.config import ModelTrainingConfig, PredictionConfig
+from src.utils import Read_write_yaml_schema, compare_schema_for_model_training, S3ModelUploader, convert_xgboost_to_onnx
+from config.config import ModelTrainingConfig, PredictionConfig, mlflow_config
 
 
 # ============================================================================
-# DAGSHUB + MLFLOW CONFIGURATION
+# DAGSHUB + MLFLOW CONFIGURATION (loaded from config.py)
 # ============================================================================
 
 # Initialize DagsHub for remote MLflow tracking
 dagshub.init(
-    repo_owner='santosh4thmarch', 
-    repo_name='IEEE-CIS-Fraud-detection', 
+    repo_owner=mlflow_config.repo_owner,
+    repo_name=mlflow_config.repo_name,
     mlflow=True
 )
 
-# Set MLflow tracking URI to DagsHub
-mlflow.set_tracking_uri('https://dagshub.com/santosh4thmarch/IEEE-CIS-Fraud-detection.mlflow')
+# Set MLflow tracking URI
+mlflow.set_tracking_uri(mlflow_config.tracking_uri)
 
-logger.info("✓ DagsHub MLflow tracking initialized")
+logger.info(f"✓ DagsHub MLflow tracking initialized")
+logger.info(f"  Repo: {mlflow_config.repo_owner}/{mlflow_config.repo_name}")
+logger.info(f"  URI: {mlflow_config.tracking_uri}")
 
 
 # ============================================================================
@@ -480,12 +490,28 @@ class ModelTraining:
                 "model_path": model_path
             }
             
+            # Save ONNX model
+            try:
+                if hasattr(model_to_save, "n_features_in_"):
+                    n_features = model_to_save.n_features_in_
+                    onnx_filename = f"{model_name}_v{next_version}.onnx"
+                    onnx_path = os.path.join(self.config.model_save_dir, onnx_filename)
+                    convert_xgboost_to_onnx(model_to_save, onnx_path, n_features)
+                    
+                    # Save latest ONNX symlink
+                    latest_onnx_path = os.path.join(self.config.model_save_dir, f"{model_name}_latest.onnx")
+                    import shutil
+                    shutil.copy2(onnx_path, latest_onnx_path)
+                    logger.info(f"✓ Latest ONNX model: {latest_onnx_path}")
+            except Exception as e:
+                logger.warning(f"Failed to save ONNX model (non-critical): {e}")
+            
             metadata_path = os.path.join(self.config.model_save_dir, f"{model_name}_v{next_version}_metadata.yaml")
             with open(metadata_path, 'w') as f:
                 yaml.dump(metadata, f, default_flow_style=False)
             logger.info(f"✓ Metadata saved to: {metadata_path}")
             
-            # Cleanup old artifacts (models, metadata, confusion matrices, metrics)
+            # Cleanup old artifacts (models, metadata, confusion matrices, metrics, onnx)
             # Keep only the latest version just saved
             self.cleanup_old_artifacts(model_name, next_version)
             
@@ -514,6 +540,8 @@ class ModelTraining:
                 f"{model_name}_v{current_version}.joblib",
                 f"{model_name}_v{current_version}_metadata.yaml",
                 f"{model_name}_latest.joblib",
+                f"{model_name}_v{current_version}.onnx",
+                f"{model_name}_latest.onnx",
                 "metrics.json",
                 "confusion_matrix.png",
                 ".gitkeep",
@@ -541,6 +569,13 @@ class ModelTraining:
                             if version < current_version:
                                 os.remove(filepath)
                                 logger.info(f"  Deleted old model: {filename}")
+                                files_deleted += 1
+                        elif filename.endswith('.onnx'):
+                            version_str = filename.replace(model_name + "_v", "").replace(".onnx", "")
+                            version = int(version_str)
+                            if version < current_version:
+                                os.remove(filepath)
+                                logger.info(f"  Deleted old ONNX model: {filename}")
                                 files_deleted += 1
                         elif filename.endswith('_metadata.yaml'):
                             # Extract version from metadata filename

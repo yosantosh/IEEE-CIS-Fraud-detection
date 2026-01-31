@@ -5,12 +5,34 @@ All dataclass configurations for pipeline components are defined here.
 Import these configs in your component files.
 
 Usage:
-    from src.constants.config import DataIngestionConfig, DataTransformationConfig, ModelTrainingConfig
+    from config.config import DataIngestionConfig, DataTransformationConfig, ModelTrainingConfig
 """
 
 import os
 from dataclasses import dataclass, field
 from typing import Optional, List, Dict, Any
+
+
+# ============================================================================
+# MLFLOW / DAGSHUB CONFIGURATION
+# ============================================================================
+
+@dataclass
+class MLflowConfig:
+    """Configuration for MLflow and DagsHub tracking."""
+    tracking_uri: str = "https://dagshub.com/santosh4thmarch/IEEE-CIS-Fraud-detection.mlflow"
+    experiment_name: str = "IEEE-CIS-Fraud-Detection"
+    
+    @property
+    def repo_owner(self) -> str:
+        """Extract repo_owner from tracking_uri."""
+        # URI format: https://dagshub.com/{repo_owner}/{repo_name}.mlflow
+        return self.tracking_uri.replace("https://dagshub.com/", "").replace(".mlflow", "").split("/")[0]
+    
+    @property
+    def repo_name(self) -> str:
+        """Extract repo_name from tracking_uri."""
+        return self.tracking_uri.replace("https://dagshub.com/", "").replace(".mlflow", "").split("/")[1]
 
 
 # ============================================================================
@@ -24,17 +46,21 @@ class DataIngestionConfig:
     raw_data_dir: str = "artifacts/data/raw"
     processed_data_dir: str = "artifacts/data/processed"
     raw_data_path: str = "artifacts/data/raw/raw_data.csv"
-    schema_yaml_path: str = "src/constants/schema.yaml"
+    schema_yaml_path: str = "config/schema.yaml"
     
     # Row limit for reading data (None = read all rows, set to int for sampling)
     # Useful for development/testing with large datasets
-    nrows: Optional[int] = 20000  # e.g., 10000 for quick testing, None for full dataset
+    nrows: Optional[int] = 10_00  # e.g., 10000 for quick testing, None for full dataset
     
     # S3 settings (from environment variables)
     bucket_name: str = os.getenv("S3_BUCKET_NAME", "mlops-capstone-project-final")
     transaction_key: str = "train_transaction.csv"
     identity_key: str = "train_identity.csv"
     aws_region: str = os.getenv("AWS_DEFAULT_REGION", "us-east-1")
+    
+    # Merge settings
+    merge_on: str = "TransactionID"
+    target_column: str = "isFraud"
 
 
 # ============================================================================
@@ -49,7 +75,8 @@ class DataTransformationConfig:
     processed_data_dir: str = "artifacts/data/transformed"
     train_path: str = "artifacts/data/transformed/Train_transformed.csv"
     test_path: str = "artifacts/data/transformed/Test_transformed.csv"
-    schema_yaml_path: str = "src/constants/schema.yaml"
+    schema_yaml_path: str = "config/schema.yaml"
+    model_dir: str = "models"  # For preprocessor.joblib
     
     # Split settings
     test_size: float = 0.2
@@ -110,16 +137,15 @@ class DataTransformationConfig:
 class ModelTrainingConfig:
     """Configuration for model training pipeline."""
     # Paths
-    params_yaml_path: str = "src/constants/params.yaml"
-    schema_yaml_path: str = "src/constants/schema.yaml"
+    params_yaml_path: str = "config/params.yaml"
+    schema_yaml_path: str = "config/schema.yaml"
     train_data_path: str = "artifacts/data/transformed/Train_transformed.csv"
     test_data_path: str = "artifacts/data/transformed/Test_transformed.csv"
     model_save_dir: str = "models"
     
-    # MLflow settings
+    # MLflow settings (uses MLflowConfig)
     experiment_name: str = "exp_1"
     run_name: str = "XGBClassifier_run"
-    tracking_uri: str = "mlruns"  # Local mlruns folder, can be set to remote
     
     # Training settings
     test_size: float = 0.13
@@ -131,6 +157,9 @@ class ModelTrainingConfig:
     strict_schema_validation: bool = True  # STRICT MODE - fail on mismatch!
 
 
+# ============================================================================
+# PREDICTION CONFIGURATION
+# ============================================================================
 
 @dataclass
 class PredictionConfig:
@@ -139,10 +168,10 @@ class PredictionConfig:
     s3_model_uri: str = 's3://mlops-capstone-project-final/models/'
     model_name: str = "XGBClassifier"
     model_version: str = "latest"  # 'latest', 'v1', 'v2', etc.
-    local_model_dir: str = "models"
+    local_model_dir: str = os.getenv('MODEL_CACHE_DIR', 'models')
     
     # Schema settings
-    schema_yaml_path: str = "src/constants/schema.yaml"
+    schema_yaml_path: str = "config/schema.yaml"
     raw_schema_name: str = "raw_data"
     target_column: str = "isFraud"
     
@@ -163,11 +192,20 @@ class PathConfig:
     artifacts_dir: str = "artifacts"
     models_dir: str = "models"
     logs_dir: str = "logs"
+    config_dir: str = "config"
     
     # Data directories
     raw_data_dir: str = "artifacts/data/raw"
     transformed_data_dir: str = "artifacts/data/transformed"
     
     # Config files
-    params_yaml: str = "src/constants/params.yaml"
-    schema_yaml: str = "src/constants/schema.yaml"
+    params_yaml: str = "config/params.yaml"
+    schema_yaml: str = "config/schema.yaml"
+
+
+# ============================================================================
+# SINGLETON INSTANCES (for easy access)
+# ============================================================================
+
+# MLflow config instance (used globally)
+mlflow_config = MLflowConfig()

@@ -208,13 +208,51 @@ marimo/_static/
 marimo/_lsp/
 __marimo__/
 
+# ================================================
+# Project-Specific Ignores
+# ================================================
 
-
-#----------------------------
+# Credentials (NEVER commit)
 credentials.txt
-experiments/
 .env
-artifacts/
+.env.local
+.env.*.local
+
+# Keep .env.example as documentation
+!.env.example
+
+# Experiments / Scratch
+experiments/
+scratch/
+
+# Large Data Files (tracked by DVC or in S3)
 data/
-.dvc/config.local/
+artifacts/
+*.csv
+*.parquet
+
+# Models (fetched from S3 at runtime)
+models/
+!models/.gitkeep
+
+# MLflow local tracking
+mlruns/
+
+# DVC
+.dvc/config.local
 .dvc/cache/
+.dvc/tmp/
+
+# Logs
+logs/
+*.log
+
+# Docker volumes / local data
+docker-data/
+
+# IDE
+.vscode/settings.json
+.idea/
+
+# Notebooks checkpoints
+.ipynb_checkpoints/

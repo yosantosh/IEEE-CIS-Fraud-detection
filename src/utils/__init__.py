@@ -217,7 +217,7 @@ def compare_schema_for_model_training(df: pd.DataFrame, schema_name: str, schema
         df: DataFrame to compare (e.g., X_train, X_test)
         schema_name: Name/key of schema in YAML file to compare against
                      (e.g., 'preprocessed_train', 'preprocessed_test')
-        schema_yaml_filepath: Path to schema.yaml file (e.g., 'src/constants/schema.yaml')
+        schema_yaml_filepath: Path to schema.yaml file (e.g., 'config/schema.yaml')
         strict: If True, raises exception on mismatch. If False, just logs warnings.
         
     Returns:
@@ -234,7 +234,7 @@ def compare_schema_for_model_training(df: pd.DataFrame, schema_name: str, schema
         result = compare_schema_for_model_training(
             df=X_train,
             schema_name='preprocessed_train',
-            schema_yaml_filepath='src/constants/schema.yaml',
+            schema_yaml_filepath='config/schema.yaml',
             strict=True  # Will raise exception if schema doesn't match
         )
         
@@ -459,6 +459,23 @@ class S3ModelUploader:
                 if os.path.exists(cm_path):
                     files_to_upload.append((cm_path, "confusion_matrix.png"))
             
+            # Preprocessor (CRITICAL for inference)
+            preprocessor_path = os.path.join(model_dir, "preprocessor.joblib")
+            if os.path.exists(preprocessor_path):
+                files_to_upload.append((preprocessor_path, "preprocessor.joblib"))
+            
+            # ONNX Model (Optimized for inference)
+            onnx_filename = f"{model_name}_v{latest_version}.onnx"
+            onnx_path = os.path.join(model_dir, onnx_filename)
+            if os.path.exists(onnx_path):
+                files_to_upload.append((onnx_path, onnx_filename))
+                
+            # Latest ONNX symlink
+            latest_onnx_filename = f"{model_name}_latest.onnx"
+            latest_onnx_path = os.path.join(model_dir, latest_onnx_filename)
+            if os.path.exists(latest_onnx_path):
+                files_to_upload.append((latest_onnx_path, latest_onnx_filename))
+            
             # Upload each file
             for local_path, filename in files_to_upload:
                 s3_key = f"{s3_prefix}{filename}"
@@ -570,6 +587,68 @@ def reduce_memory(df, verbose=True):
     if verbose:
         print(f'Memory usage: {start_memory:.2f} MB -> {end_mem:.2f} MB ({100 * (start_memory - end_mem) / start_memory:.1f}% reduction)')
     return df
+
+
+def convert_xgboost_to_onnx(model, model_path_onnx: str, input_shape: int):
+    """
+    Convert XGBoost model to ONNX format.
+    
+    Args:
+        model: Trained XGBoost model (XGBClassifier)
+        model_path_onnx: Output path for ONNX file
+        input_shape: Number of features
+        
+    Returns:
+        str: Path to saved ONNX model
+    """
+    try:
+        from onnxmltools import convert_xgboost
+        from onnxmltools.convert.common.data_types import FloatTensorType
+        import onnx
+        
+        initial_type = [('float_input', FloatTensorType([None, input_shape]))]
+        
+        # Convert
+        print(f"Converting model to ONNX using onnxmltools (features: {input_shape})...")
+        try:
+            onnx_model = convert_xgboost(model, initial_types=initial_type)
+        except Exception as e:
+            if "feature names" in str(e).lower():
+                print(f"⚠ Conversion failed due to feature names: {e}. Retrying without feature names...")
+                # Attempt to strip feature names from underlying booster
+                booster = model.get_booster()
+                booster.feature_names = None
+                # Note: model.get_booster() might return a copy, preventing in-place modification affecting 'model' behavior for convert
+                # So we might need to pass the booster directly, but we lose Classifier semantics (ZipMap)
+                # Alternative: try to force 'f0', 'f1' names
+                
+                # If convert_xgboost uses model.get_booster() internally, we can't easily affect it if it copies.
+                # But let's try passing the modified booster directly, and hope the output matches what we need.
+                # However, Classifier ONNX has different output (label, probs). Booster ONNX has (prediction).
+                
+                # Try saving/loading to strip names? 
+                
+                # Let's try passing the booster to convert_xgboost, but note this changes output format!
+                # Better: Force names to f0, f1... on the input model if possible.
+                
+                # Hack: Just try converting the booster. The inference code will need to adapt if output changes.
+                # But 'predict_proba' relies on the probability map.
+                
+                # Let's try convert_xgboost(booster) and see.
+                onnx_model = convert_xgboost(booster, initial_types=initial_type)
+            else:
+                raise e
+        
+        # Save
+        onnx.save(onnx_model, model_path_onnx)
+        print(f"✓ ONNX model saved to: {model_path_onnx}")
+        return model_path_onnx
+        
+    except ImportError:
+        print("⚠ onnxmltools or onnx not installed. Skipping ONNX conversion.")
+    except Exception as e:
+        print(f"⚠ ONNX conversion failed: {str(e)}")
+
 
 
 

@@ -25,7 +25,7 @@ from sklearn.pipeline import make_pipeline
 from src.utils import reduce_memory, Read_write_yaml_schema
 from src.logger import logger
 from src.exception import CustomException
-from src.constants.config import DataTransformationConfig
+from config.config import DataTransformationConfig
 
 
 

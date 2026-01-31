@@ -1,0 +1,69 @@
+# docker-compose.yml
+# ===========================================
+# Local development and testing for both services
+# Usage:
+#   docker-compose up inference    → Test API only
+#   docker-compose up training     → Run training pipeline
+#   docker-compose up              → Run both
+# ===========================================
+
+services:
+  # =========================================
+  # INFERENCE SERVICE (FastAPI)
+  # =========================================
+  inference:
+    build:
+      context: .
+      dockerfile: docker/inference.Dockerfile
+    container_name: fraud-inference
+    ports:
+      - "8000:8000" # Access at http://localhost:8000
+    environment:
+      # AWS credentials for fetching model from S3
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION:-us-east-1}
+      # Model settings
+      - MODEL_CACHE_DIR=/tmp/models
+      - S3_BUCKET=${S3_BUCKET:-mlops-capstone-project-final}
+    volumes:
+      # Optional: mount model cache to persist between restarts (faster dev)
+      - model-cache:/tmp/models
+      # Mount source code for hot-reloading fixes
+      - ./src:/app/src
+    restart: unless-stopped
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:8000/health" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  # =========================================
+  # TRAINING SERVICE (DVC Pipeline)
+  # =========================================
+  training:
+    build:
+      context: .
+      dockerfile: docker/training.Dockerfile
+    container_name: fraud-training
+    environment:
+      # AWS credentials for DVC
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION:-us-east-1}
+      # DagsHub/MLflow (if using)
+      - DAGSHUB_TOKEN=${DAGSHUB_TOKEN:-}
+      - MLFLOW_TRACKING_URI=${MLFLOW_TRACKING_URI:-}
+    volumes:
+      # Mount artifacts for inspection after training
+      - ./artifacts:/app/artifacts
+      - ./models:/app/models
+      - ./logs:/app/logs
+    # Training runs once and exits (not a long-running service)
+    restart: "no"
+
+# Named volumes for persistence
+volumes:
+  model-cache:
+    name: fraud-model-cache

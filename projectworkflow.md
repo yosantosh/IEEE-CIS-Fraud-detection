@@ -14,7 +14,9 @@ This document explains the complete step-by-step workflow for building the IEEE-
 5. [Phase 5: Data Ingestion Component](#phase-5-data-ingestion-component)
 6. [Phase 6: Feature Engineering Component](#phase-6-feature-engineering-component)
 7. [Phase 7: Model Training Component](#phase-7-model-training-component)
-8. [Quick Reference Commands](#quick-reference-commands)
+8. [Phase 8: Prediction Pipeline](#phase-8-prediction-pipeline--completed)
+9. [Phase 9: Dockerization](#phase-9-dockerization--completed)
+10. [Quick Reference Commands](#quick-reference-commands)
 
 ---
 
@@ -536,7 +538,9 @@ IEEE-CIS-Fraud-detection/
 | Feature Engineering | ✅ Complete | ✅ |
 | Model Training | ✅ Complete | ✅ |
 | Model Evaluation | ✅ Complete | ✅ |
-| Model Deployment | 🔄 Next | - |
+| Prediction Pipeline | ✅ Complete | - |
+| Dockerization | ✅ Complete | - |
+| CI/CD Pipeline | 🔄 Next | - |
 
 ---
 
@@ -562,8 +566,585 @@ The preprocessed data schemas are auto-generated. If there's a mismatch:
 ---
 
 
-# PHASE-8 : Prediction Pipeline for inference.  
+# PHASE 8: PREDICTION PIPELINE ✅ COMPLETED
+## Building the inference prediction system
 
-**Last Updated**: January 29, 2026
+### Location: `src/components/prediction.py`
+
+### What it does:
+1. **Fetches latest model** from S3 bucket
+2. **Loads model and preprocessor** for inference
+3. **Validates input data** against the raw_data schema
+4. **Applies all feature engineering** transformations
+5. **Preprocesses data** for model consumption
+6. **Makes predictions** using the XGBoost model
+7. **Returns results** with TransactionID and prediction
+
+### DVC is NOT used for prediction:
+- Model is fetched directly from S3 using `s3_model_pusher` utility
+- This keeps inference lightweight and independent
+
+---
+
+# PHASE 9: DOCKERIZATION ✅ COMPLETED
+## Containerizing the ML Pipeline with Docker
+
+### Overview
+We're using a **microservices architecture** instead of a monolithic approach. This means we have two separate Docker containers:
+- **Training Container**: Runs the DVC pipeline to train models
+- **Inference Container**: Serves the FastAPI prediction API
+
+This approach enables:
+- ✅ Independent scaling of training and inference
+- ✅ Kubernetes deployment (AKS/EKS) ready
+- ✅ Isolated environments for each service
+- ✅ Easier CI/CD integration
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                     MICROSERVICES ARCHITECTURE                               │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│   ┌─────────────────────┐          ┌─────────────────────┐                  │
+│   │  TRAINING CONTAINER │          │ INFERENCE CONTAINER │                  │
+│   │  ─────────────────  │          │  ─────────────────  │                  │
+│   │                     │          │                     │                  │
+│   │  • DVC Pipeline     │  Model   │  • FastAPI Server   │                  │
+│   │  • Data Ingestion   │ ──────►  │  • Model Loading    │                  │
+│   │  • Feature Eng.     │  (S3)    │  • Predictions      │                  │
+│   │  • Model Training   │          │  • REST API         │                  │
+│   │                     │          │                     │                  │
+│   └─────────────────────┘          └─────────────────────┘                  │
+│            │                                │                                │
+│            ▼                                ▼                                │
+│   ┌─────────────────────┐          ┌─────────────────────┐                  │
+│   │     AWS S3          │          │  Port 8000          │                  │
+│   │  (Model Storage)    │          │  (API Endpoint)     │                  │
+│   └─────────────────────┘          └─────────────────────┘                  │
+│                                                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 9.1 Training Dockerfile
+### Location: `docker/training.Dockerfile`
+
+### Multi-Stage Build Strategy
+We use a 2-stage build for smaller image size:
+
+```dockerfile
+# Stage 1: Builder (installs dependencies)
+FROM python:3.13-slim as builder
+# ... install build tools & pip packages
+
+# Stage 2: Runtime (copies only what's needed)
+FROM python:3.13-slim as runtime
+# ... lean production image
+```
+
+### Key Components Explained:
+
+| What's Copied | Why It's Needed |
+|--------------|-----------------|
+| `src/` | Application source code |
+| `config/` | Configuration files (params.yaml, schema.yaml) |
+| `dvc.yaml` | DVC pipeline definition |
+| `.dvc/` | DVC remote config (S3 URLs) |
+
+### What's NOT Copied:
+
+| Excluded | Reason |
+|----------|--------|
+| `dvc.lock` | Fresh pipeline run, no cached hashes |
+| `.dvc/cache/` | Large files, will pull from S3 |
+| `.dvc/config.local` | Contains local secrets |
+| `artifacts/` | Data pulled from S3 |
+| `models/` | Model pulled from S3 |
+
+### Training Dockerfile Structure:
+```dockerfile
+# Stage 1: Builder
+FROM python:3.13-slim as builder
+WORKDIR /app
+
+# Install build tools
+RUN apt-get update && apt-get install -y build-essential git
+
+# Create virtual environment
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+# Install dependencies
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Stage 2: Runtime
+FROM python:3.13-slim as runtime
+WORKDIR /app
+
+# Runtime deps (git for DVC, libgomp1 for XGBoost)
+RUN apt-get update && apt-get install -y git libgomp1
+
+# Copy venv from builder
+COPY --from=builder /opt/venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+# Copy application code
+COPY src/ ./src/
+COPY config/ ./config/
+COPY dvc.yaml ./
+COPY .dvc/ ./.dvc/
+
+# Create directories
+RUN mkdir -p artifacts logs models
+
+# Environment variables
+ENV PYTHONPATH=/app
+ENV PYTHONUNBUFFERED=1
+
+# Entry point
+COPY docker/scripts/run_training.sh .
+CMD ["./run_training.sh"]
+```
+
+### Training Entrypoint Script: `docker/scripts/run_training.sh`
+```bash
+#!/bin/bash
+set -e  # Exit on error
+
+# Initialize git (required by DVC)
+git init
+git config user.email "ci@example.com"
+git config user.name "CI Runner"
+
+# Configure DagsHub authentication
+export DAGSHUB_USER_TOKEN=$DAGSHUB_TOKEN
+
+# Configure DVC with AWS credentials
+dvc remote modify s3remote access_key_id $AWS_ACCESS_KEY_ID
+dvc remote modify s3remote secret_access_key $AWS_SECRET_ACCESS_KEY
+
+# Pull cached data from S3
+dvc pull --allow-missing --force || true
+
+# Run training pipeline
+dvc repro --force
+
+# Push artifacts to S3
+dvc push
+```
+
+---
+
+## 9.2 Inference Dockerfile
+### Location: `docker/inference.Dockerfile`
+
+### Key Differences from Training:
+- ✅ Lighter dependencies (no DVC, no git)
+- ✅ Exposes port 8000 for API
+- ✅ Includes healthcheck endpoint
+- ✅ Uses `/tmp/models` for model caching
+
+### Model Path Solution:
+**Problem**: Local code uses `models/` but Docker needs `/tmp/models` for ephemeral storage.
+
+**Solution**: Environment variable with fallback
+```python
+# In config.py
+local_model_dir: str = os.getenv('MODEL_CACHE_DIR', 'models')
+```
+
+```dockerfile
+# Sets it in Docker
+ENV MODEL_CACHE_DIR=/tmp/models
+```
+
+This way:
+- **Local**: Uses `models/` directory
+- **Docker**: Uses `/tmp/models` (persists across requests, not rebuilds)
+
+### Inference Dockerfile Structure:
+```dockerfile
+# Stage 1: Builder
+FROM python:3.13-slim as builder
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y build-essential
+
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+# Lighter requirements for inference only
+COPY requirements-inference.txt requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Stage 2: Runtime
+FROM python:3.13-slim as runtime
+WORKDIR /app
+
+# Runtime deps (curl for healthcheck, libgomp1 for XGBoost)
+RUN apt-get update && apt-get install -y curl libgomp1
+
+COPY --from=builder /opt/venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+# Copy application code
+COPY src/ ./src/
+COPY config/ ./config/
+COPY static/ ./static/
+
+# Create model cache directory
+RUN mkdir -p /tmp/models && chmod 777 /tmp/models
+
+# Environment variables
+ENV PYTHONPATH=/app
+ENV PYTHONUNBUFFERED=1
+ENV MODEL_CACHE_DIR=/tmp/models
+
+# Expose API port
+EXPOSE 8000
+
+# Health check (for Kubernetes readiness probe)
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD curl -f http://localhost:8000/health || exit 1
+
+# Start FastAPI server
+CMD ["python", "-m", "uvicorn", "src.api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+```
+
+---
+
+## 9.3 Docker Compose (Local Testing)
+### Location: `docker-compose.yml`
+
+Docker Compose orchestrates both services for local development and testing.
+
+### Configuration:
+```yaml
+services:
+  # Inference API Service
+  inference:
+    build:
+      context: .
+      dockerfile: docker/inference.Dockerfile
+    container_name: fraud-inference
+    ports:
+      - "8000:8000"
+    environment:
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION:-us-east-1}
+      - MODEL_CACHE_DIR=/tmp/models
+    volumes:
+      - model-cache:/tmp/models    # Persist model between restarts
+      - ./src:/app/src             # Hot-reload for development
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+
+  # Training Pipeline Service
+  training:
+    build:
+      context: .
+      dockerfile: docker/training.Dockerfile
+    container_name: fraud-training
+    environment:
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - DAGSHUB_TOKEN=${DAGSHUB_TOKEN}
+    volumes:
+      - ./artifacts:/app/artifacts  # Inspect outputs
+      - ./models:/app/models
+      - ./logs:/app/logs
+    restart: "no"  # Run once and exit
+
+volumes:
+  model-cache:
+    name: fraud-model-cache
+```
+
+---
+
+## 9.4 Requirements Setup
+
+### Step 1: Export Dependencies
+```bash
+conda activate mlops
+pip freeze > requirements.txt
+```
+
+### Step 2: Clean Up requirements.txt
+Remove these lines:
+- Lines with `@ file:///` (local path references)
+- `-e .` (local package)
+- Any weird formatting
+
+**Why?** Docker automatically finds `src/` at `/app/src` because of `PYTHONPATH=/app`.
+
+### Step 3: Create Inference Requirements (Optional)
+For a smaller inference image:
+```bash
+# requirements-inference.txt (lighter version)
+fastapi
+uvicorn
+pandas
+numpy
+xgboost
+scikit-learn
+boto3
+joblib
+python-dotenv
+```
+
+---
+
+## 9.5 Environment Variables & Secrets
+
+### Local Development (.env file):
+```bash
+# .env (DO NOT COMMIT!)
+AWS_ACCESS_KEY_ID=your_access_key
+AWS_SECRET_ACCESS_KEY=your_secret_key
+AWS_DEFAULT_REGION=us-east-1
+DAGSHUB_TOKEN=your_dagshub_token
+S3_BUCKET=mlops-capstone-project-final
+```
+
+### DagsHub Token Setup:
+1. Go to DagsHub → Settings → Access Tokens
+2. Create new token with MLflow permissions
+3. Add to `.env` locally
+4. Add to GitHub Secrets for CI/CD
+
+### Why DAGSHUB_TOKEN?
+Without it, MLflow prompts for interactive authentication which fails in Docker containers.
+
+---
+
+## 9.6 Docker Commands Reference
+
+### Build Images
+```bash
+# Build both images
+docker compose build
+
+# Build specific image
+docker build -t fraud-detection-training -f docker/training.Dockerfile .
+docker build -t fraud-detection-inference -f docker/inference.Dockerfile .
+```
+
+### Run Services
+```bash
+# Start Inference API only
+docker compose up inference
+# → Access at http://localhost:8000
+# → Health check at http://localhost:8000/health
+
+# Run Training Pipeline
+docker compose up training
+# → Runs DVC pipeline and exits
+
+# Start both
+docker compose up
+
+# Run in background
+docker compose up -d
+```
+
+### Debug & Monitor
+```bash
+# View logs
+docker logs -f fraud-training
+docker logs -f fraud-inference
+
+# Enter container shell
+docker exec -it fraud-inference /bin/bash
+
+# Check running containers
+docker ps
+
+# Stop services
+docker compose down
+
+# Stop and remove volumes
+docker compose down -v
+```
+
+---
+
+## 9.7 Project Structure After Dockerization
+
+```
+IEEE-CIS-Fraud-detection/
+├── docker/
+│   ├── training.Dockerfile      # Training container
+│   ├── inference.Dockerfile     # Inference container
+│   └── scripts/
+│       └── run_training.sh      # Training entrypoint script
+├── docker-compose.yml           # Local orchestration
+├── requirements.txt             # Full dependencies (training)
+├── requirements-inference.txt   # Minimal dependencies (inference)
+├── .env                         # Local secrets (NOT committed)
+├── .dockerignore                # Exclude from Docker build
+└── ...
+```
+
+---
+
+## 9.8 Docker Compose Test Status
+
+| Service | Status | Test Command |
+|---------|--------|--------------|
+| Training Container | ✅ Working | `docker compose up training` |
+| Inference Container | ✅ Working | `docker compose up inference` |
+| Health Check | ✅ Working | `curl http://localhost:8000/health` |
+| Prediction API | ✅ Working | `curl -X POST http://localhost:8000/predict` |
+
+---
+
+## 9.9 Key Takeaways
+
+### Model Storage Strategy:
+- **DVC Push**: Pushes data artifacts (CSVs) to S3
+- **S3 Model Pusher**: Pushes trained models directly to S3
+- **Inference**: Fetches model directly from S3 (no DVC needed)
+
+### Multi-Stage Build Benefits:
+- **Smaller images**: Only runtime dependencies in final image
+- **Security**: Build tools not in production image
+- **Caching**: Faster rebuilds when only code changes
+
+### Environment Flexibility:
+```
+Local Development:  models/           (via default)
+Docker Container:   /tmp/models       (via ENV variable)
+Kubernetes Pod:     Persistent Volume (via mount)
+```
+
+---
+
+## 9.10 S3 Data Flow: What Gets Pushed & Pulled? 🔄
+
+### Visual Overview:
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                        S3 DATA FLOW DIAGRAM                                  │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│  ┌─────────────────────┐                                                    │
+│  │  TRAINING SERVICE   │                                                    │
+│  └──────────┬──────────┘                                                    │
+│             │                                                                │
+│             ▼                                                                │
+│  ┌─────────────────────────────────────────────────┐                        │
+│  │                   PUSHES TO S3                   │                        │
+│  ├─────────────────────────────────────────────────┤                        │
+│  │                                                  │                        │
+│  │  📦 DVC Push (run_training.sh)                  │                        │
+│  │  ─────────────────────────────                  │                        │
+│  │  • artifacts/data/raw/raw_data.csv              │                        │
+│  │  • artifacts/data/transformed/Train_transformed │                        │
+│  │  • artifacts/data/transformed/Test_transformed  │                        │
+│  │                                                  │                        │
+│  │  🚀 S3 Model Pusher (model_training.py)         │                        │
+│  │  ─────────────────────────────                  │                        │
+│  │  • models/XGBClassifier_v{N}.joblib             │                        │
+│  │  • models/XGBClassifier_v{N}_metadata.yaml      │                        │
+│  │  • models/preprocessor.joblib                   │                        │
+│  │                                                  │                        │
+│  └─────────────────────────────────────────────────┘                        │
+│                          │                                                   │
+│                          ▼                                                   │
+│            ┌──────────────────────────┐                                     │
+│            │        AWS S3 BUCKET      │                                     │
+│            │ mlops-capstone-project    │                                     │
+│            └──────────────────────────┘                                     │
+│                          │                                                   │
+│                          ▼                                                   │
+│  ┌─────────────────────────────────────────────────┐                        │
+│  │                  PULLS FROM S3                   │                        │
+│  ├─────────────────────────────────────────────────┤                        │
+│  │                                                  │                        │
+│  │  🔽 Inference Service (prediction.py)           │                        │
+│  │  ─────────────────────────────                  │                        │
+│  │  • models/XGBClassifier_latest.joblib           │                        │
+│  │  • models/preprocessor.joblib                   │                        │
+│  │                                                  │                        │
+│  │  ❌ Does NOT pull:                              │                        │
+│  │  • Training data (CSVs)                         │                        │
+│  │  • DVC artifacts                                │                        │
+│  │                                                  │                        │
+│  └─────────────────────────────────────────────────┘                        │
+│             │                                                                │
+│             ▼                                                                │
+│  ┌─────────────────────┐                                                    │
+│  │ INFERENCE SERVICE   │                                                    │
+│  └─────────────────────┘                                                    │
+│                                                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Training Service → S3 (PUSH)
+
+| What | Method | S3 Path | When |
+|------|--------|---------|------|
+| `raw_data.csv` | `dvc push` | `s3://bucket/artifacts/data/raw/` | After data ingestion |
+| `Train_transformed.csv` | `dvc push` | `s3://bucket/artifacts/data/transformed/` | After feature engineering |
+| `Test_transformed.csv` | `dvc push` | `s3://bucket/artifacts/data/transformed/` | After feature engineering |
+| `XGBClassifier_v{N}.joblib` | `S3ModelPusher` | `s3://bucket/models/` | After model training |
+| `preprocessor.joblib` | `S3ModelPusher` | `s3://bucket/models/` | After feature engineering |
+| `metadata.yaml` | `S3ModelPusher` | `s3://bucket/models/` | After model training |
+
+### Inference Service ← S3 (PULL)
+
+| What | Method | Pulled From | When |
+|------|--------|-------------|------|
+| `XGBClassifier_latest.joblib` | `fetch_model_from_s3()` | `s3://bucket/models/` | On first request or cache miss |
+| `preprocessor.joblib` | `_fetch_preprocessor()` | `s3://bucket/models/` | On first request or cache miss |
+
+### Important Notes:
+
+1. **Two Different Push Methods**:
+   - `dvc push` → For data artifacts (tracked by DVC)
+   - `S3ModelPusher` → For model files (direct S3 upload, NOT tracked by DVC)
+
+2. **Why Model is NOT DVC Tracked?**
+   - Faster deployment (no DVC overhead)
+   - Inference service doesn't need DVC installed
+   - Simpler model versioning with `_v{N}` suffix
+
+3. **Model Caching in Inference**:
+   ```
+   First Request:  S3 → /tmp/models/         (downloaded)
+   Next Requests:  /tmp/models/              (cached, no download)
+   Container Restart: S3 → /tmp/models/      (re-downloaded)
+   ```
+
+4. **What Inference DOES NOT Need**:
+   - ❌ Training data (CSVs)
+   - ❌ DVC installation
+   - ❌ Git repository
+   - ❌ DagsHub credentials
+
+---
+
+## 9.11 Quick Summary Table
+
+| Aspect | Training Container | Inference Container |
+|--------|-------------------|---------------------|
+| **Purpose** | Run ML pipeline | Serve predictions |
+| **Base Image** | python:3.13-slim | python:3.13-slim |
+| **Needs DVC?** | ✅ Yes | ❌ No |
+| **Needs Git?** | ✅ Yes (for DVC) | ❌ No |
+| **Exposes Port?** | ❌ No | ✅ 8000 |
+| **Pushes to S3?** | ✅ Data + Model | ❌ No |
+| **Pulls from S3?** | ✅ Cached data | ✅ Model only |
+| **Run Mode** | One-shot (exits) | Long-running (server) |
+| **Restart Policy** | `no` | `unless-stopped` |
+
+---
+
+**Last Updated**: January 31, 2026
 **Author**: Santosh
-**Commit**: Model training component completed with MLflow/DagsHub + S3 integration
+**Phase**: Dockerization completed with Training & Inference microservices

@@ -13,14 +13,10 @@ stages:
     deps:
       - src/components/data_ingestion.py
       - src/utils/fetch_data.py
-      - config/config.yaml
-      - src/constants/schema.yaml
+      - config/config.py
+      - config/schema.yaml
     outs:
       - artifacts/data/raw/raw_data.csv
-
-    params:
-      - config/config.yaml:
-          - data_ingestion.source_type
 
   # --------------------------------------------------------
   # Stage 2: Data Transformation and Feature Engineering
@@ -29,9 +25,9 @@ stages:
     cmd: python -m src.components.data_FE_transformation
     deps:
       - src/components/data_FE_transformation.py
-      - src/constants/config.py
+      - config/config.py
       - artifacts/data/raw/raw_data.csv
-      - src/constants/schema.yaml
+      - config/schema.yaml
     outs:
       - artifacts/data/transformed/Train_transformed.csv
       - artifacts/data/transformed/Test_transformed.csv
@@ -45,13 +41,13 @@ stages:
     cmd: python -m src.components.model_training_evaluation
     deps:
       - src/components/model_training_evaluation.py
-      - src/constants/config.py
-      - src/constants/params.yaml
-      - src/constants/schema.yaml
+      - config/config.py
+      - config/params.yaml
+      - config/schema.yaml
       - artifacts/data/transformed/Train_transformed.csv
       - artifacts/data/transformed/Test_transformed.csv
     params:
-      - src/constants/params.yaml:
+      - config/params.yaml:
           - model_params.XGBClassifier
           - model_training
     # NOTE: Models are now uploaded directly to S3 via custom function (not DVC)

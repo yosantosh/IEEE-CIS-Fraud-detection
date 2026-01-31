@@ -20,7 +20,7 @@ from src.logger import logger
 from src.exception import CustomException, DataIngestionException
 from src.utils import Read_write_yaml_schema
 from src.utils.fetch_data import Fetch_data
-from src.constants.config import DataIngestionConfig
+from config.config import DataIngestionConfig
 
 
 # ============================================================================

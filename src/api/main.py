@@ -21,7 +21,7 @@ from pydantic import BaseModel
 
 from src.logger import logger
 from src.components.prediction import PredictionPipeline
-from src.constants.config import PredictionConfig
+from config.config import PredictionConfig
 
 
 # ============================================================================
