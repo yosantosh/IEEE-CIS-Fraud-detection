@@ -9,7 +9,6 @@ Usage:
 
 import os
 import sys
-import yaml
 from typing import List, Dict, Any, Optional
 from contextlib import asynccontextmanager
 
@@ -30,20 +29,72 @@ from config.config import PredictionConfig
 # ============================================================================
 
 class TransactionInput(BaseModel):
-    """
-    Flexible transaction input model.
-    Accepts any key-value pairs to allow for loose schema validation 
-    (handling empty strings, missing columns) which is then cleaned in Pandas.
-    """
+    """Single transaction input model."""
     TransactionID: Optional[int] = None
+    TransactionDT: Optional[int] = None
+    TransactionAmt: Optional[float] = None
+    ProductCD: Optional[str] = None
+    card1: Optional[int] = None
+    card2: Optional[float] = None
+    card3: Optional[float] = None
+    card4: Optional[str] = None
+    card5: Optional[float] = None
+    card6: Optional[str] = None
+    addr1: Optional[float] = None
+    addr2: Optional[float] = None
+    dist1: Optional[float] = None
+    dist2: Optional[float] = None
+    P_emaildomain: Optional[str] = None
+    R_emaildomain: Optional[str] = None
+    # C columns
+    C1: Optional[float] = None
+    C2: Optional[float] = None
+    C3: Optional[float] = None
+    C4: Optional[float] = None
+    C5: Optional[float] = None
+    C6: Optional[float] = None
+    C7: Optional[float] = None
+    C8: Optional[float] = None
+    C9: Optional[float] = None
+    C10: Optional[float] = None
+    C11: Optional[float] = None
+    C12: Optional[float] = None
+    C13: Optional[float] = None
+    C14: Optional[float] = None
+    # D columns
+    D1: Optional[float] = None
+    D2: Optional[float] = None
+    D3: Optional[float] = None
+    D4: Optional[float] = None
+    D5: Optional[float] = None
+    D6: Optional[float] = None
+    D7: Optional[float] = None
+    D8: Optional[float] = None
+    D9: Optional[float] = None
+    D10: Optional[float] = None
+    D11: Optional[float] = None
+    D12: Optional[float] = None
+    D13: Optional[float] = None
+    D14: Optional[float] = None
+    D15: Optional[float] = None
+    # M columns
+    M1: Optional[str] = None
+    M2: Optional[str] = None
+    M3: Optional[str] = None
+    M4: Optional[str] = None
+    M5: Optional[str] = None
+    M6: Optional[str] = None
+    M7: Optional[str] = None
+    M8: Optional[str] = None
+    M9: Optional[str] = None
     
     class Config:
-        extra = "allow"  # Allow ALL extra fields (V1...V339, etc.)
+        extra = "allow"  # Allow extra fields for V columns and id columns
 
 
 class BatchPredictionRequest(BaseModel):
     """Batch prediction request model."""
-    transactions: List[Dict[str, Any]]  # Accept list of dicts directly
+    transactions: List[Dict[str, Any]]
 
 
 class PredictionResult(BaseModel):
@@ -152,10 +203,9 @@ async def predict_batch(request: BatchPredictionRequest):
     """
     Batch fraud prediction endpoint.
     
-    Accepts a list of transactions and returns predictions with TransactionID and isFraud.
+    Accepts a list of transactions (flexible schema) and returns predictions.
+    Performs case-insensitive column matching to ensure robustness.
     """
-    # prediction_pipeline is defined at module level and only read here, so global keyword is not needed and triggers flake8 F824
-    
     if prediction_pipeline is None or prediction_pipeline.model is None:
         raise HTTPException(
             status_code=503, 
@@ -171,44 +221,29 @@ async def predict_batch(request: BatchPredictionRequest):
     try:
         logger.info(f"Received batch prediction request with {len(request.transactions)} transactions")
         
-        # Convert to DataFrame (Input is already a list of dicts)
+        # 1. Convert Dictionary list to DataFrame (Flexible Input)
         df = pd.DataFrame(request.transactions)
         
-        # [AUTOPATCH] Clean Data: Replace empty strings with None (NaN)
-        # This fixes 422 errors where frontend sends "" for numeric fields
-        df = df.replace(r'^\s*$', None, regex=True)
+        # 2. Smart Schema Normalization (Case-Insensitive Mapping)
+        # Create a map of {lowercase_key: correct_key} from the Reference Model
+        reference_keys = TransactionInput.model_fields.keys()
+        key_map = {k.lower(): k for k in reference_keys}
         
-        # Ensure TransactionID exists
+        # Rename columns in the DF if they match a known key case-insensitively
+        new_columns = {}
+        for col in df.columns:
+            col_lower = str(col).lower().strip()
+            if col_lower in key_map:
+                new_columns[col] = key_map[col_lower]
+        
+        if new_columns:
+            logger.info(f"Normalizing {len(new_columns)} column names (e.g., {list(new_columns.items())[:3]}...)")
+            df.rename(columns=new_columns, inplace=True)
+        
+        # 3. Ensure TransactionID exists
         if 'TransactionID' not in df.columns:
+            logger.warning("'TransactionID' not found in input, generating sequential IDs.")
             df['TransactionID'] = range(1, len(df) + 1)
-        
-        # [AUTOPATCH] Load schema to identify missing columns and fill them with None (permisssive mode)
-        pred_config = PredictionConfig()
-        if os.path.exists(pred_config.schema_yaml_path):
-            try:
-                with open(pred_config.schema_yaml_path, 'r') as f:
-                    schema_data = yaml.safe_load(f) or {}
-                
-                if pred_config.raw_schema_name in schema_data:
-                    raw_schema = schema_data[pred_config.raw_schema_name]
-                    # Get list of expected columns
-                    expected_cols = list(raw_schema.keys())
-                    
-                    # Exclude target column
-                    if pred_config.target_column in expected_cols:
-                        expected_cols.remove(pred_config.target_column)
-                    
-                    # Identify missing columns
-                    missing_cols = [c for c in expected_cols if c not in df.columns]
-                    
-                    if missing_cols:
-                        logger.info(f"Filling {len(missing_cols)} missing columns (schema mismatch) with None for inference")
-                        # Add missing columns efficiently
-                        # Using pd.concat or reindex might be cleaner but assigning None works
-                        for col in missing_cols:
-                            df[col] = None
-            except Exception as e:
-                 logger.warning(f"Schema auto-fill failed: {e}")
         
         # Run prediction pipeline
         result_df = prediction_pipeline.predict(df)
@@ -236,6 +271,11 @@ async def predict_batch(request: BatchPredictionRequest):
         
     except Exception as e:
         logger.error(f"Prediction failed: {str(e)}")
+        # Log the first few rows of input to help debug
+        try:
+             logger.error(f"Input Data Sample: {request.transactions[:1]}")
+        except:
+             pass
         raise HTTPException(
             status_code=500,
             detail=f"Prediction failed: {str(e)}"

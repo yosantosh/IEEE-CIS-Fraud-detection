@@ -407,7 +407,7 @@ class PredictionPipeline(Data_FE_Transformation):
             
             # Log comparison results
             result = {
-                'match': len(missing_columns) == 0,  # Only fail on missing columns
+                'match': len(missing_columns) == 0,
                 'missing_columns': missing_columns,
                 'extra_columns': extra_columns,
             }
@@ -417,17 +417,18 @@ class PredictionPipeline(Data_FE_Transformation):
                 if extra_columns:
                     logger.warning(f"  Extra columns in input (will be ignored): {extra_columns[:5]}...")
             else:
-                logger.error(f"✗ Schema validation FAILED!")
-                logger.error(f"  Missing required columns ({len(missing_columns)}): {missing_columns[:10]}...")
-                raise SchemaValidationError(
-                    f"Schema validation failed. Missing {len(missing_columns)} required columns. "
-                    f"First 10: {missing_columns[:10]}"
-                )
+                # SMART SCHEMA HANDLING: Don't fail, just fill missing with NaN
+                logger.warning(f"⚠ Schema mismatch! Missing {len(missing_columns)} columns. Filling with NaN.")
+                logger.warning(f"  Missing: {missing_columns[:10]}...")
+                
+                # Add missing columns with NaN
+                for col in missing_columns:
+                    df[col] = np.nan
+                    
+                logger.info("✓ Missing columns added with NaN values (Robust Mode)")
             
             return result
             
-        except SchemaValidationError:
-            raise
         except Exception as e:
             logger.error(f"Schema validation error: {str(e)}")
             raise CustomException(e, sys)
