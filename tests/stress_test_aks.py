@@ -13,31 +13,27 @@ CONCURRENT_THREADS = 20
 # Dummy Data Payload (Single transaction in a batch)
 def get_dummy_payload():
     return {
-        "transactions": [
-            {
-                "TransactionID": 3000000 + random.randint(1, 10000),
-                "TransactionDT": 100000,
-                "TransactionAmt": 100.0,
-                "ProductCD": "W",
-                "card1": 10000,
-                "card2": 111,
-                "card3": 150,
-                "card4": "visa",
-                "card5": 226,
-                "card6": "debit",
-                "addr1": 300,
-                "addr2": 87,
-                "dist1": 15.0,
-                "dist2": None,
-                "P_emaildomain": "gmail.com",
-                "R_emaildomain": None,
-                # Add a few V columns to pass basic schema validation if needed
-                "V1": 1.0, "V2": 1.0, "V3": 1.0,
-                # Add ID columns
-                "id_01": None, "id_12": "Found",
-                "DeviceType": "mobile", "DeviceInfo": "SAMSUNG"
-            }
-        ]
+        "TransactionID": [3000000 + random.randint(1, 10000)],
+        "TransactionDT": [100000],
+        "TransactionAmt": [100.0],
+        "ProductCD": ["W"],
+        "card1": [10000],
+        "card2": [111],
+        "card3": [150],
+        "card4": ["visa"],
+        "card5": [226],
+        "card6": ["debit"],
+        "addr1": [300],
+        "addr2": [87],
+        "dist1": [15.0],
+        "dist2": [None],
+        "P_emaildomain": ["gmail.com"],
+        "R_emaildomain": [None],
+        # Add a few V columns to pass basic schema validation if needed (though API might handle missing)
+        "V1": [1.0], "V2": [1.0], "V3": [1.0],
+        # Add ID columns
+        "id_01": [None], "id_12": ["Found"],
+        "DeviceType": ["mobile"], "DeviceInfo": ["SAMSUNG"]
     }
 
 def send_request(request_id):
