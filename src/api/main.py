@@ -30,72 +30,20 @@ from config.config import PredictionConfig
 # ============================================================================
 
 class TransactionInput(BaseModel):
-    """Single transaction input model."""
+    """
+    Flexible transaction input model.
+    Accepts any key-value pairs to allow for loose schema validation 
+    (handling empty strings, missing columns) which is then cleaned in Pandas.
+    """
     TransactionID: Optional[int] = None
-    TransactionDT: Optional[int] = None
-    TransactionAmt: Optional[float] = None
-    ProductCD: Optional[str] = None
-    card1: Optional[int] = None
-    card2: Optional[float] = None
-    card3: Optional[float] = None
-    card4: Optional[str] = None
-    card5: Optional[float] = None
-    card6: Optional[str] = None
-    addr1: Optional[float] = None
-    addr2: Optional[float] = None
-    dist1: Optional[float] = None
-    dist2: Optional[float] = None
-    P_emaildomain: Optional[str] = None
-    R_emaildomain: Optional[str] = None
-    # C columns
-    C1: Optional[float] = None
-    C2: Optional[float] = None
-    C3: Optional[float] = None
-    C4: Optional[float] = None
-    C5: Optional[float] = None
-    C6: Optional[float] = None
-    C7: Optional[float] = None
-    C8: Optional[float] = None
-    C9: Optional[float] = None
-    C10: Optional[float] = None
-    C11: Optional[float] = None
-    C12: Optional[float] = None
-    C13: Optional[float] = None
-    C14: Optional[float] = None
-    # D columns
-    D1: Optional[float] = None
-    D2: Optional[float] = None
-    D3: Optional[float] = None
-    D4: Optional[float] = None
-    D5: Optional[float] = None
-    D6: Optional[float] = None
-    D7: Optional[float] = None
-    D8: Optional[float] = None
-    D9: Optional[float] = None
-    D10: Optional[float] = None
-    D11: Optional[float] = None
-    D12: Optional[float] = None
-    D13: Optional[float] = None
-    D14: Optional[float] = None
-    D15: Optional[float] = None
-    # M columns
-    M1: Optional[str] = None
-    M2: Optional[str] = None
-    M3: Optional[str] = None
-    M4: Optional[str] = None
-    M5: Optional[str] = None
-    M6: Optional[str] = None
-    M7: Optional[str] = None
-    M8: Optional[str] = None
-    M9: Optional[str] = None
     
     class Config:
-        extra = "allow"  # Allow extra fields for V columns and id columns
+        extra = "allow"  # Allow ALL extra fields (V1...V339, etc.)
 
 
 class BatchPredictionRequest(BaseModel):
     """Batch prediction request model."""
-    transactions: List[TransactionInput]
+    transactions: List[Dict[str, Any]]  # Accept list of dicts directly
 
 
 class PredictionResult(BaseModel):
@@ -223,8 +171,12 @@ async def predict_batch(request: BatchPredictionRequest):
     try:
         logger.info(f"Received batch prediction request with {len(request.transactions)} transactions")
         
-        # Convert to DataFrame
-        df = pd.DataFrame([t.model_dump() for t in request.transactions])
+        # Convert to DataFrame (Input is already a list of dicts)
+        df = pd.DataFrame(request.transactions)
+        
+        # [AUTOPATCH] Clean Data: Replace empty strings with None (NaN)
+        # This fixes 422 errors where frontend sends "" for numeric fields
+        df = df.replace(r'^\s*$', None, regex=True)
         
         # Ensure TransactionID exists
         if 'TransactionID' not in df.columns:
