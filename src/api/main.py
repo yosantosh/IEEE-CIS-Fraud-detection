@@ -94,7 +94,7 @@ class TransactionInput(BaseModel):
 
 class BatchPredictionRequest(BaseModel):
     """Batch prediction request model."""
-    transactions: List[Dict[str, Any]]
+    transactions: List[TransactionInput]
 
 
 class PredictionResult(BaseModel):
@@ -223,7 +223,7 @@ async def predict_batch(request: BatchPredictionRequest):
         logger.info(f"Received batch prediction request with {len(request.transactions)} transactions")
         
         # Convert to DataFrame
-        df = pd.DataFrame(request.transactions)
+        df = pd.DataFrame([t.model_dump() for t in request.transactions])
         
         # Ensure TransactionID exists
         if 'TransactionID' not in df.columns:

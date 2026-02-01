@@ -1,0 +1,78 @@
+name: CI Pipeline
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+jobs:
+  # ------------------------------------------------------------------
+  # JOB 1: QUALITY & TEST
+  # ------------------------------------------------------------------
+  test:
+    name: Code Quality & Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          cache: 'pip'
+
+      - name: Install Dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-cov flake8 httpx
+
+      - name: 🔍 Lint Code (Flake8)
+        # Stop the build if there are Python syntax errors or undefined names
+        run: |
+          flake8 src/ tests/ --count --select=E9,F63,F7,F82 --show-source --statistics
+          # exit-zero treats all errors as warnings. The GitHub editor is 127 chars wide
+          flake8 src/ tests/ --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+
+      - name: 🧪 Run Tests (Unit, API, Schema, Config)
+        # Run pytest and generate a coverage report
+        run: |
+          pytest tests/ -v --cov=src --cov-report=xml
+
+  # ------------------------------------------------------------------
+  # JOB 2: BUILD CHECK
+  # ------------------------------------------------------------------
+  build-check:
+    name: Verify Docker Build
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        
+      - name: � Login to Docker Hub
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: �🐳 Build & Push Training Image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: docker/training.Dockerfile
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/fraud-training:${{ github.sha }}, ${{ secrets.DOCKERHUB_USERNAME }}/fraud-training:latest
+          
+      - name: 🐳 Build & Push Inference Image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: docker/inference.Dockerfile
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/fraud-inference:${{ github.sha }}, ${{ secrets.DOCKERHUB_USERNAME }}/fraud-inference:latest

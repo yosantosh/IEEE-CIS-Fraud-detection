@@ -1,723 +1,56 @@
 # CI/CD Complete Tutorial & Implementation Plan
-
-> **Document Version**: 1.0  
-> **Created**: 2026-01-30  
+> **Document Version**: 3.0 (Architecture Aligned)  
+> **Created**: 2026-02-01  
 > **For**: IEEE-CIS Fraud Detection Project
 
 ---
 
 ## Table of Contents
 
-1. [What is CI/CD? (Theory)](#part-1-what-is-cicd-theory)
-2. [GitHub Actions Fundamentals](#part-2-github-actions-fundamentals)
-3. [CI/CD Pipeline Design for Our Project](#part-3-cicd-pipeline-design-for-our-project)
-4. [Deployment Strategies](#part-4-deployment-strategies)
-5. [Implementation Guide](#part-5-implementation-guide)
+1. [Part 1: Architecture & Theory](#part-1-architecture--theory)
+2. [Part 2: The Continuous Integration (CI) Phase](#part-2-the-continuous-integration-ci-phase)
+3. [Part 3: Deployment Strategy A - Microservices on Azure AKS](#part-3-deployment-strategy-a---microservices-on-azure-aks)
+4. [Part 4: Deployment Strategy B - Microservices on AWS EKS](#part-4-deployment-strategy-b---microservices-on-aws-eks)
+5. [Part 5: Deployment Strategy C - Monolith Inference on AWS App Runner](#part-5-deployment-strategy-c---monolith-inference-on-aws-app-runner)
 
 ---
 
-# Part 1: What is CI/CD? (Theory)
+# Part 1: Architecture & Theory
 
-## 1.1 The Problem CI/CD Solves
+## 1.1 The Golden Loop of CI/CD
+In modern software engineering, we aim for a "Golden Loop":
+1.  **Code**: You write code on your laptop.
+2.  **Commit**: You push to GitHub.
+3.  **CI (Continuous Integration)**: A robot (GitHub Actions) immediately runs tests to ensure you didn't break anything.
+4.  **CD (Continuous Deployment)**: If tests pass, the robot packages your code into a Docker container and ships it to the cloud.
 
-```
-TRADITIONAL DEVELOPMENT (Without CI/CD):
-═══════════════════════════════════════
+## 1.2 Our Three Deployment Architectures
+We are supporting three specific architectures as requested:
 
-Developer A ──┐
-Developer B ──┼──▶ Manual Integration ──▶ Manual Testing ──▶ Manual Deploy
-Developer C ──┘         │                      │                  │
-                        ▼                      ▼                  ▼
-                   "It works on              Bugs found        Deployment
-                    my machine!"              too late          failures
-                   
-PROBLEMS:
-❌ Integration conflicts discovered late
-❌ Manual testing is slow and error-prone
-❌ Deployment is risky and stressful
-❌ Long feedback loops (days/weeks)
-```
-
-```
-MODERN DEVELOPMENT (With CI/CD):
-════════════════════════════════
-
-Developer A ──┐                    ┌──▶ Auto Build
-Developer B ──┼──▶ Git Push ──▶ CI ├──▶ Auto Test   ──▶ CD ──▶ Auto Deploy
-Developer C ──┘                    └──▶ Auto Lint
-                                            │
-                                            ▼
-                                   Feedback in minutes!
-                                   
-BENEFITS:
-✅ Immediate feedback on code changes
-✅ Consistent, repeatable builds
-✅ Automated testing catches bugs early
-✅ Reliable, stress-free deployments
-```
+| Architecture | Platform | Service Type | Role | Components |
+| :--- | :--- | :--- | :--- | :--- |
+| **Strategy A** | **Azure AKS** | **Microservices** | Full System | • **Inference Service** (Deployment)<br>• **Training Service** (CronJob) |
+| **Strategy B** | **AWS EKS** | **Microservices** | Full System | • **Inference Service** (Deployment)<br>• **Training Service** (CronJob) |
+| **Strategy C** | **AWS App Runner** | **Monolithic** | Inference Only | • **Inference Service** (Service) |
 
 ---
 
-## 1.2 CI vs CD Explained
+# Part 2: The Continuous Integration (CI) Phase
 
-### Continuous Integration (CI)
+Before we can deploy anywhere, we must ensure our code is robust. This phase runs on **every push** to the `main` branch.
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                        CONTINUOUS INTEGRATION (CI)                           │
-│                                                                              │
-│  "Integrate code changes frequently and verify each integration"            │
-│                                                                              │
-│  ┌─────────────────────────────────────────────────────────────────────────┐│
-│  │                          TRIGGER                                        ││
-│  │                                                                          ││
-│  │   Developer pushes code ──▶ GitHub receives push ──▶ CI Pipeline starts ││
-│  └─────────────────────────────────────────────────────────────────────────┘│
-│                                    │                                         │
-│                                    ▼                                         │
-│  ┌─────────────────────────────────────────────────────────────────────────┐│
-│  │                          CI PIPELINE                                     ││
-│  │                                                                          ││
-│  │   ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐ ││
-│  │   │  Clone   │─▶│  Install │─▶│   Lint   │─▶│   Test   │─▶│  Build   │ ││
-│  │   │   Repo   │  │   Deps   │  │   Code   │  │   Code   │  │ Artifact │ ││
-│  │   └──────────┘  └──────────┘  └──────────┘  └──────────┘  └──────────┘ ││
-│  │                                                                          ││
-│  └─────────────────────────────────────────────────────────────────────────┘│
-│                                    │                                         │
-│                                    ▼                                         │
-│  ┌─────────────────────────────────────────────────────────────────────────┐│
-│  │                          RESULT                                          ││
-│  │                                                                          ││
-│  │   ✅ PASS: Code is good, ready for next stage                           ││
-│  │   ❌ FAIL: Developer notified, must fix before merge                    ││
-│  │                                                                          ││
-│  └─────────────────────────────────────────────────────────────────────────┘│
-└─────────────────────────────────────────────────────────────────────────────┘
+## 2.1 The CI Workflow (`.github/workflows/ci.yml`)
+This workflow performs three key checks:
+1.  **Linting**: Checks code style (PEP8).
+2.  **Testing**: Runs robust unit tests using `pytest` and mocks.
+3.  **Build Check**: Verifies that Docker images CAN be built (without pushing yet).
 
-CI ACTIVITIES:
-• Code compilation/build
-• Unit tests
-• Integration tests
-• Code linting (style checks)
-• Security scanning
-• Docker image building
-```
+### Step-by-Step Implementation
 
-### Continuous Delivery vs Continuous Deployment (CD)
-
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                      CONTINUOUS DELIVERY                                     │
-│                                                                              │
-│  "Automatically prepare releases, but deploy MANUALLY"                      │
-│                                                                              │
-│   CI ──▶ Build ──▶ Test ──▶ Stage ──▶ [MANUAL APPROVAL] ──▶ Production     │
-│                                              │                               │
-│                                       Human clicks                           │
-│                                       "Deploy" button                        │
-│                                                                              │
-│  USE WHEN:                                                                   │
-│  • Regulatory requirements need human approval                              │
-│  • You want control over release timing                                     │
-│  • High-risk applications (banking, healthcare)                             │
-│                                                                              │
-└─────────────────────────────────────────────────────────────────────────────┘
-
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                      CONTINUOUS DEPLOYMENT                                   │
-│                                                                              │
-│  "Automatically deploy EVERY change that passes tests"                      │
-│                                                                              │
-│   CI ──▶ Build ──▶ Test ──▶ Stage ──▶ Auto Deploy ──▶ Production           │
-│                                           │                                  │
-│                                    No human needed!                          │
-│                                                                              │
-│  USE WHEN:                                                                   │
-│  • Fast iteration is important                                              │
-│  • Strong test coverage gives confidence                                    │
-│  • Team is mature and experienced                                           │
-│                                                                              │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
-
----
-
-## 1.3 The Complete CI/CD Pipeline Flow
-
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                       COMPLETE CI/CD PIPELINE                                │
-│                                                                              │
-│   PHASE 1: SOURCE                                                            │
-│   ┌─────────────────────────────────────────────────────────────────────┐   │
-│   │  Developer ──▶ Commit ──▶ Push to GitHub ──▶ Pull Request           │   │
-│   └─────────────────────────────────────────────────────────────────────┘   │
-│                                    │                                         │
-│                                    ▼                                         │
-│   PHASE 2: BUILD (CI)                                                        │
-│   ┌─────────────────────────────────────────────────────────────────────┐   │
-│   │  Checkout ──▶ Install Dependencies ──▶ Compile/Build                │   │
-│   └─────────────────────────────────────────────────────────────────────┘   │
-│                                    │                                         │
-│                                    ▼                                         │
-│   PHASE 3: TEST (CI)                                                         │
-│   ┌─────────────────────────────────────────────────────────────────────┐   │
-│   │  Unit Tests ──▶ Integration Tests ──▶ Code Quality ──▶ Security     │   │
-│   └─────────────────────────────────────────────────────────────────────┘   │
-│                                    │                                         │
-│                                    ▼                                         │
-│   PHASE 4: PACKAGE                                                           │
-│   ┌─────────────────────────────────────────────────────────────────────┐   │
-│   │  Build Docker Image ──▶ Push to Container Registry (ECR/GHCR)       │   │
-│   └─────────────────────────────────────────────────────────────────────┘   │
-│                                    │                                         │
-│                                    ▼                                         │
-│   PHASE 5: DEPLOY (CD)                                                       │
-│   ┌─────────────────────────────────────────────────────────────────────┐   │
-│   │  Deploy to Staging ──▶ Run Smoke Tests ──▶ Deploy to Production     │   │
-│   └─────────────────────────────────────────────────────────────────────┘   │
-│                                    │                                         │
-│                                    ▼                                         │
-│   PHASE 6: MONITOR                                                           │
-│   ┌─────────────────────────────────────────────────────────────────────┐   │
-│   │  Health Checks ──▶ Metrics ──▶ Alerts ──▶ Rollback if needed        │   │
-│   └─────────────────────────────────────────────────────────────────────┘   │
-│                                                                              │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
-
----
-
-# Part 2: GitHub Actions Fundamentals
-
-## 2.1 What is GitHub Actions?
-
-GitHub Actions is GitHub's built-in CI/CD platform. It runs your pipelines on GitHub's servers (or your own).
-
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                       GITHUB ACTIONS ARCHITECTURE                            │
-│                                                                              │
-│   YOUR REPOSITORY                          GITHUB'S SERVERS                  │
-│   ┌────────────────────┐                   ┌────────────────────────────┐   │
-│   │  .github/          │                   │       RUNNERS               │   │
-│   │  └── workflows/    │   ──Triggers──▶   │                            │   │
-│   │      └── ci.yml    │                   │  ubuntu-latest ───────┐    │   │
-│   │                    │                   │  windows-latest ──────┤    │   │
-│   │  src/              │                   │  macos-latest ────────┤    │   │
-│   │  tests/            │                   │  self-hosted ─────────┘    │   │
-│   │  ...               │                   │                            │   │
-│   └────────────────────┘                   │  Your workflow runs here!  │   │
-│                                            └────────────────────────────┘   │
-│                                                                              │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
-
-## 2.2 Key Concepts
+**1. Create the Workflow File**
+Create `.github/workflows/ci.yml`:
 
 ```yaml
-# .github/workflows/example.yml
-
-name: My First Pipeline          # WORKFLOW NAME
-
-on:                              # TRIGGERS - When to run
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
-
-jobs:                            # JOBS - What to run
-  build:                         # JOB NAME
-    runs-on: ubuntu-latest       # RUNNER - Where to run
-    
-    steps:                       # STEPS - Individual tasks
-      - name: Checkout code
-        uses: actions/checkout@v4    # ACTION - Reusable task
-        
-      - name: Run custom command
-        run: echo "Hello World"      # RUN - Shell command
-```
-
-### Concept Breakdown:
-
-| Concept | Description | Example |
-|---------|-------------|---------|
-| **Workflow** | The entire pipeline defined in a YAML file | `ci.yml` |
-| **Trigger** | Events that start the workflow | `push`, `pull_request`, `schedule` |
-| **Job** | A set of steps that run on the same runner | `build`, `test`, `deploy` |
-| **Step** | Individual task within a job | Checkout, Install, Test |
-| **Action** | Reusable unit of code | `actions/checkout@v4` |
-| **Runner** | Server that executes your workflow | `ubuntu-latest`, self-hosted |
-
-## 2.3 Workflow Syntax Deep Dive
-
-```yaml
-name: Complete Example
-
-# ═══════════════════════════════════════════════════════════════════════════
-# TRIGGERS
-# ═══════════════════════════════════════════════════════════════════════════
-on:
-  # Run on push to main
-  push:
-    branches: [main]
-    paths:
-      - 'src/**'           # Only if src/ files changed
-      - '!**.md'           # Ignore markdown files
-  
-  # Run on PRs to main
-  pull_request:
-    branches: [main]
-  
-  # Run on schedule (cron)
-  schedule:
-    - cron: '0 2 * * 0'    # Every Sunday at 2 AM
-  
-  # Manual trigger
-  workflow_dispatch:
-    inputs:
-      environment:
-        description: 'Target environment'
-        required: true
-        default: 'staging'
-
-# ═══════════════════════════════════════════════════════════════════════════
-# ENVIRONMENT VARIABLES (available to all jobs)
-# ═══════════════════════════════════════════════════════════════════════════
-env:
-  PYTHON_VERSION: '3.10'
-  REGISTRY: ghcr.io
-
-# ═══════════════════════════════════════════════════════════════════════════
-# JOBS
-# ═══════════════════════════════════════════════════════════════════════════
-jobs:
-  # ─────────────────────────────────────────────────────────────────────────
-  # JOB 1: Build and Test
-  # ─────────────────────────────────────────────────────────────────────────
-  build:
-    name: Build & Test
-    runs-on: ubuntu-latest
-    
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-      
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-          cache: 'pip'        # Cache pip dependencies
-      
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-      
-      - name: Run tests
-        run: pytest tests/ -v --cov=src --cov-report=xml
-      
-      - name: Upload coverage
-        uses: codecov/codecov-action@v3
-        with:
-          files: coverage.xml
-
-  # ─────────────────────────────────────────────────────────────────────────
-  # JOB 2: Build Docker Image
-  # ─────────────────────────────────────────────────────────────────────────
-  docker:
-    name: Build Docker Image
-    needs: build              # Wait for build job to complete
-    runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main'  # Only on main branch
-    
-    outputs:
-      image_tag: ${{ steps.meta.outputs.tags }}
-    
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-      
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-      
-      - name: Login to Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      
-      - name: Extract metadata
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ github.repository }}
-          tags: |
-            type=sha
-            type=raw,value=latest
-      
-      - name: Build and push
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-  # ─────────────────────────────────────────────────────────────────────────
-  # JOB 3: Deploy
-  # ─────────────────────────────────────────────────────────────────────────
-  deploy:
-    name: Deploy to Production
-    needs: docker
-    runs-on: ubuntu-latest
-    environment: production    # Requires approval
-    
-    steps:
-      - name: Deploy to server
-        run: echo "Deploying ${{ needs.docker.outputs.image_tag }}"
-```
-
----
-
-# Part 3: CI/CD Pipeline Design for Our Project
-
-## 3.1 Where CI/CD Fits in Our Architecture
-
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                    CI/CD IN OUR FRAUD DETECTION SYSTEM                       │
-│                                                                              │
-│   DEVELOPER WORKFLOW:                                                        │
-│                                                                              │
-│   ┌─────────┐    ┌─────────┐    ┌─────────────────────────────────────────┐ │
-│   │  Code   │───▶│  Push   │───▶│           GITHUB ACTIONS                │ │
-│   │ Change  │    │   to    │    │                                          │ │
-│   │         │    │  GitHub │    │  ┌──────────────────────────────────┐   │ │
-│   └─────────┘    └─────────┘    │  │            CI STAGE              │   │ │
-│                                 │  │                                   │   │ │
-│                                 │  │  1. Checkout code                │   │ │
-│                                 │  │  2. Install dependencies         │   │ │
-│                                 │  │  3. Run linting (flake8)         │   │ │
-│                                 │  │  4. Run unit tests (pytest)      │   │ │
-│                                 │  │  5. Build Docker images          │   │ │
-│                                 │  │  6. Push to Container Registry   │   │ │
-│                                 │  │                                   │   │ │
-│                                 │  └──────────────────────────────────┘   │ │
-│                                 │                    │                     │ │
-│                                 │                    ▼                     │ │
-│                                 │  ┌──────────────────────────────────┐   │ │
-│                                 │  │            CD STAGE              │   │ │
-│                                 │  │                                   │   │ │
-│                                 │  │  Option A: GitHub Runner          │   │ │
-│                                 │  │  ─────────────────────────        │   │ │
-│                                 │  │  Deploy to Kubernetes (kubectl)  │   │ │
-│                                 │  │                                   │   │ │
-│                                 │  │  Option B: AWS EC2                │   │ │
-│                                 │  │  ──────────────                   │   │ │
-│                                 │  │  SSH to EC2 + docker-compose     │   │ │
-│                                 │  │                                   │   │ │
-│                                 │  └──────────────────────────────────┘   │ │
-│                                 │                                          │ │
-│                                 └──────────────────────────────────────────┘ │
-│                                                    │                         │
-│                                                    ▼                         │
-│                           ┌────────────────────────────────────────────────┐ │
-│                           │              PRODUCTION                         │ │
-│                           │                                                 │ │
-│                           │  ┌─────────────────┐  ┌─────────────────────┐  │ │
-│                           │  │   Training      │  │    Inference        │  │ │
-│                           │  │   Service       │  │    Service          │  │ │
-│                           │  │   (CronJob)     │  │    (Deployment+HPA) │  │ │
-│                           │  └─────────────────┘  └─────────────────────┘  │ │
-│                           │                                                 │ │
-│                           └────────────────────────────────────────────────┘ │
-│                                                                              │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
-
-## 3.2 Our CI/CD Stages
-
-| Stage | What Happens | Tools |
-|-------|--------------|-------|
-| **Source** | Code pushed to GitHub | Git, GitHub |
-| **Build** | Dependencies installed, code compiled | pip, Python |
-| **Test** | Unit tests, integration tests, linting | pytest, flake8 |
-| **Package** | Docker images built and pushed | Docker, GHCR/ECR |
-| **Deploy** | Application deployed to servers | kubectl, SSH, docker-compose |
-| **Verify** | Smoke tests, health checks | curl, pytest |
-
----
-
-# Part 4: Deployment Strategies
-
-## 4.1 Option A: Deploy with GitHub-Hosted Runners
-
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                   DEPLOYMENT VIA GITHUB-HOSTED RUNNERS                       │
-│                                                                              │
-│   GITHUB ACTIONS                           KUBERNETES CLUSTER               │
-│   ┌────────────────────────┐               ┌────────────────────────────┐   │
-│   │                        │               │                            │   │
-│   │   ubuntu-latest        │    kubectl    │   ┌──────────────────┐    │   │
-│   │   runner               │─────apply────▶│   │   Deployment     │    │   │
-│   │                        │               │   │   (new image)    │    │   │
-│   │   Has:                 │               │   └──────────────────┘    │   │
-│   │   • kubectl installed  │               │            │              │   │
-│   │   • kubeconfig secret  │               │            ▼              │   │
-│   │                        │               │   ┌──────────────────┐    │   │
-│   └────────────────────────┘               │   │   Rolling        │    │   │
-│                                            │   │   Update         │    │   │
-│                                            │   └──────────────────┘    │   │
-│                                            │                            │   │
-│                                            └────────────────────────────┘   │
-│                                                                              │
-│   PROS:                              CONS:                                   │
-│   ✅ No infrastructure to manage    ❌ Need to expose K8s API              │
-│   ✅ Free for public repos          ❌ Security: kubeconfig in secrets      │
-│   ✅ Easy to set up                 ❌ Limited customization                │
-│                                                                              │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
-
-### Workflow Code for Kubernetes Deployment:
-
-```yaml
-# .github/workflows/deploy-k8s.yml
-name: Deploy to Kubernetes
-
-on:
-  push:
-    branches: [main]
-
-env:
-  REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}/fraud-inference
-
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    outputs:
-      image_tag: ${{ steps.meta.outputs.tags }}
-    steps:
-      - uses: actions/checkout@v4
-      
-      - name: Login to GHCR
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      
-      - name: Build and push
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: docker/inference.Dockerfile
-          push: true
-          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
-
-  deploy:
-    needs: build
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      
-      - name: Set up kubectl
-        uses: azure/setup-kubectl@v3
-        with:
-          version: 'v1.28.0'
-      
-      - name: Configure kubectl
-        run: |
-          echo "${{ secrets.KUBE_CONFIG }}" | base64 -d > kubeconfig
-          echo "KUBECONFIG=$(pwd)/kubeconfig" >> $GITHUB_ENV
-      
-      - name: Update deployment
-        run: |
-          kubectl set image deployment/inference-service \
-            inference=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }} \
-            -n fraud-detection-inference
-      
-      - name: Wait for rollout
-        run: |
-          kubectl rollout status deployment/inference-service \
-            -n fraud-detection-inference --timeout=300s
-```
-
----
-
-## 4.2 Option B: Deploy to AWS EC2
-
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                      DEPLOYMENT TO AWS EC2                                   │
-│                                                                              │
-│   GITHUB ACTIONS                               AWS EC2 INSTANCE             │
-│   ┌────────────────────────┐                   ┌────────────────────────┐   │
-│   │                        │                   │                        │   │
-│   │   ubuntu-latest        │      SSH          │   ┌────────────────┐   │   │
-│   │   runner               │─────────────────▶ │   │   Docker       │   │   │
-│   │                        │                   │   │                │   │   │
-│   │   Steps:               │                   │   │ docker-compose │   │   │
-│   │   1. SSH to EC2        │                   │   │    pull        │   │   │
-│   │   2. Pull new image    │                   │   │    up -d       │   │   │
-│   │   3. Restart container │                   │   │                │   │   │
-│   │                        │                   │   └────────────────┘   │   │
-│   └────────────────────────┘                   │                        │   │
-│                                                └────────────────────────┘   │
-│                                                                              │
-│   PROS:                              CONS:                                   │
-│   ✅ Simple architecture            ❌ Single point of failure              │
-│   ✅ Full control over server       ❌ Manual scaling                       │
-│   ✅ Lower cost for small apps      ❌ Need to manage EC2 instance          │
-│                                                                              │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
-
-### Setting Up EC2 for Deployment:
-
-```bash
-# On your EC2 instance (one-time setup)
-
-# 1. Install Docker
-sudo yum update -y  # Or apt-get for Ubuntu
-sudo yum install docker -y
-sudo systemctl start docker
-sudo systemctl enable docker
-sudo usermod -aG docker ec2-user
-
-# 2. Install Docker Compose
-sudo curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
-sudo chmod +x /usr/local/bin/docker-compose
-
-# 3. Create app directory
-mkdir -p /home/ec2-user/fraud-detection
-cd /home/ec2-user/fraud-detection
-
-# 4. Create docker-compose.yml (or copy from repo)
-```
-
-### Workflow Code for EC2 Deployment:
-
-```yaml
-# .github/workflows/deploy-ec2.yml
-name: Deploy to EC2
-
-on:
-  push:
-    branches: [main]
-
-env:
-  REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}/fraud-inference
-
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      
-      - name: Login to GHCR
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      
-      - name: Build and push
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: docker/inference.Dockerfile
-          push: true
-          tags: |
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
-
-  deploy:
-    needs: build
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      
-      - name: Deploy to EC2
-        uses: appleboy/ssh-action@v1.0.0
-        with:
-          host: ${{ secrets.EC2_HOST }}
-          username: ${{ secrets.EC2_USER }}
-          key: ${{ secrets.EC2_SSH_KEY }}
-          script: |
-            cd /home/ec2-user/fraud-detection
-            
-            # Login to registry
-            echo ${{ secrets.GITHUB_TOKEN }} | docker login ghcr.io -u ${{ github.actor }} --password-stdin
-            
-            # Pull new image
-            docker-compose pull
-            
-            # Restart with new image
-            docker-compose up -d
-            
-            # Cleanup old images
-            docker image prune -f
-            
-            # Verify health
-            sleep 10
-            curl -f http://localhost:8000/health || exit 1
-```
-
----
-
-## 4.3 Comparison: GitHub Runner vs EC2
-
-| Aspect | GitHub Runner + K8s | EC2 + Docker Compose |
-|--------|---------------------|----------------------|
-| **Complexity** | Higher | Lower |
-| **Scaling** | Automatic (HPA) | Manual |
-| **Cost** | Higher (K8s cluster) | Lower (single instance) |
-| **Reliability** | High (multi-pod) | Lower (single server) |
-| **Best For** | Production, high traffic | Dev/staging, small apps |
-| **Setup Time** | Days | Hours |
-
----
-
-# Part 5: Implementation Guide
-
-## 5.1 Repository Structure
-
-```
-IEEE-CIS-Fraud-detection/
-├── .github/
-│   └── workflows/
-│       ├── ci.yml                 # Build & Test
-│       ├── deploy-staging.yml     # Deploy to staging
-│       └── deploy-production.yml  # Deploy to production
-├── docker/
-│   ├── training.Dockerfile
-│   └── inference.Dockerfile
-├── kubernetes/
-│   ├── base/
-│   │   ├── deployment.yaml
-│   │   ├── service.yaml
-│   │   └── hpa.yaml
-│   └── overlays/
-│       ├── staging/
-│       └── production/
-├── src/
-├── tests/
-├── docker-compose.yml
-└── requirements.txt
-```
-
-## 5.2 Complete CI Workflow
-
-```yaml
-# .github/workflows/ci.yml
 name: CI Pipeline
 
 on:
@@ -726,375 +59,389 @@ on:
   pull_request:
     branches: [main]
 
-env:
-  PYTHON_VERSION: '3.10'
-
 jobs:
-  # ═══════════════════════════════════════════════════════════════════════════
-  # LINT & FORMAT CHECK
-  # ═══════════════════════════════════════════════════════════════════════════
-  lint:
-    name: Code Quality
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-      
-      - name: Install linting tools
-        run: pip install flake8 black isort
-      
-      - name: Check formatting with black
-        run: black --check src/ tests/
-      
-      - name: Check imports with isort
-        run: isort --check-only src/ tests/
-      
-      - name: Lint with flake8
-        run: flake8 src/ tests/ --max-line-length=100
-
-  # ═══════════════════════════════════════════════════════════════════════════
-  # UNIT TESTS
-  # ═══════════════════════════════════════════════════════════════════════════
   test:
-    name: Unit Tests
+    name: Code Quality & Tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
-          python-version: ${{ env.PYTHON_VERSION }}
+          python-version: '3.10'
           cache: 'pip'
-      
-      - name: Install dependencies
-        run: |
+      - run: |
           pip install --upgrade pip
           pip install -r requirements.txt
-          pip install pytest pytest-cov
-      
-      - name: Run tests
-        run: |
-          pytest tests/ -v \
-            --cov=src \
-            --cov-report=xml \
-            --cov-report=term-missing
-      
-      - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v3
-        if: always()
-        with:
-          files: ./coverage.xml
-          fail_ci_if_error: false
+          pip install pytest pytest-cov flake8 httpx
+      - name: 🔍 Lint Code
+        run: flake8 src/ tests/ --count --max-line-length=127 --statistics
+      - name: 🧪 Run Unit Tests
+        run: pytest tests/ -v --cov=src --cov-report=xml
 
-  # ═══════════════════════════════════════════════════════════════════════════
-  # BUILD DOCKER IMAGES
-  # ═══════════════════════════════════════════════════════════════════════════
-  build-training:
-    name: Build Training Image
-    needs: [lint, test]
+  build-and-push:
+    name: Build & Push Docker Images
+    needs: test
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main'
-    
     steps:
       - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
       
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-      
-      - name: Login to GHCR
+      - name: 🔑 Login to Docker Hub
+        if: github.event_name != 'pull_request'
         uses: docker/login-action@v3
         with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      
-      - name: Build and push
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: 🐳 Build & Push Training Image
         uses: docker/build-push-action@v5
         with:
           context: .
           file: docker/training.Dockerfile
-          push: true
-          tags: |
-            ghcr.io/${{ github.repository }}/fraud-training:${{ github.sha }}
-            ghcr.io/${{ github.repository }}/fraud-training:latest
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/fraud-training:${{ github.sha }}, ${{ secrets.DOCKERHUB_USERNAME }}/fraud-training:latest
 
-  build-inference:
-    name: Build Inference Image
-    needs: [lint, test]
-    runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main'
-    
-    outputs:
-      image_tag: ghcr.io/${{ github.repository }}/fraud-inference:${{ github.sha }}
-    
-    steps:
-      - uses: actions/checkout@v4
-      
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-      
-      - name: Login to GHCR
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      
-      - name: Build and push
+      - name: 🐳 Build & Push Inference Image
         uses: docker/build-push-action@v5
         with:
           context: .
           file: docker/inference.Dockerfile
-          push: true
-          tags: |
-            ghcr.io/${{ github.repository }}/fraud-inference:${{ github.sha }}
-            ghcr.io/${{ github.repository }}/fraud-inference:latest
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/fraud-inference:${{ github.sha }}, ${{ secrets.DOCKERHUB_USERNAME }}/fraud-inference:latest
 ```
 
-## 5.3 Complete CD Workflow (Kubernetes)
+## 2.2 The "Build Once" Philosophy (Best Practice)
+We have upgraded this pipeline to follow the **Build Once, Deploy Many** pattern:
+1.  **PRs**: Only perform a "dry run" build (ensure Dockerfile is valid).
+2.  **Merge to Main**: Build the image **once** and push it to the registry (Docker Hub).
+3.  **CD**: The deployment stages (CD) simply **pull** this exact image using its SHA tag. This guarantees that what you verified in CI is *exactly* what runs in production.
+
+*(Note: Ensure you have `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` added to your GitHub Repository Secrets)*
+
+## 2.3 Alternative: CI using AWS ECR
+If you prefer using **AWS Elastic Container Registry (ECR)** instead of Docker Hub, use this configuration for the `build-and-push` job.
+
+**Prerequisites:**
+1.  Create ECR repositories in AWS Console (`fraud-training` and `fraud-inference`).
+2.  Add Secrets to GitHub: `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION`.
 
 ```yaml
-# .github/workflows/deploy-production.yml
-name: Deploy to Production
+  build-and-push:
+    name: Build & Push to ECR
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+
+      # 1. Configure AWS Credentials
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      # 2. Login to ECR
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+      
+      # 3. Build & Push (Dynamic Registry URL)
+      - name: 🐳 Build & Push Training Image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: docker/training.Dockerfile
+          push: ${{ github.event_name != 'pull_request' }}
+          # steps.login-ecr.outputs.registry returns your account URL (e.g., 123456789.dkr.ecr.us-east-1.amazonaws.com)
+          tags: ${{ steps.login-ecr.outputs.registry }}/fraud-training:${{ github.sha }}, ${{ steps.login-ecr.outputs.registry }}/fraud-training:latest
+
+      - name: 🐳 Build & Push Inference Image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: docker/inference.Dockerfile
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.login-ecr.outputs.registry }}/fraud-inference:${{ github.sha }}, ${{ steps.login-ecr.outputs.registry }}/fraud-inference:latest
+```
+
+---
+
+# Part 3: Deployment Strategy A - Microservices on Azure AKS
+
+**Goal**: Full system (Training + Inference) on Azure Kubernetes Service using **Azure Container Registry (ACR)**.
+
+## 3.1 Infrastructure Setup (One-Time)
+Run locally using Azure CLI:
+
+```bash
+# 1. Create Resource Group & ACR
+az group create --name fraud-detection-rg --location eastus
+az acr create --resource-group fraud-detection-rg --name frauddetectionacr --sku Basic --admin-enabled true
+
+# 2. Create AKS Cluster (Attached to ACR for auto-auth)
+az aks create --resource-group fraud-detection-rg --name fraud-aks-cluster --node-count 2 --attach-acr frauddetectionacr --generate-ssh-keys
+
+# 3. Create Credentials for GitHub
+az ad sp create-for-rbac --name "github-actions-fraud" --role contributor --scopes /subscriptions/{SUBSCRIPTION_ID}/resourceGroups/fraud-detection-rg --sdk-auth
+# SAVE OUTPUT AS 'AZURE_CREDENTIALS' in GitHub Secrets
+```
+
+## 3.2 Kubernetes Manifests (`kubernetes/aks/`)
+
+**1. `inference.yaml` (The API Service)**
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: inference-service
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: inference
+  template:
+    metadata:
+      labels:
+        app: inference
+    spec:
+      containers:
+      - name: inference
+        image: IMAGE_PLACEHOLDER
+        ports:
+        - containerPort: 8000
+        env:
+        - name: AWS_ACCESS_KEY_ID
+          valueFrom: {secretKeyRef: {name: app-secrets, key: AWS_ACCESS_KEY_ID}}
+        - name: AWS_SECRET_ACCESS_KEY
+          valueFrom: {secretKeyRef: {name: app-secrets, key: AWS_SECRET_ACCESS_KEY}}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: inference-service
+spec:
+  type: LoadBalancer
+  ports:
+  - port: 80
+    targetPort: 8000
+  selector:
+    app: inference
+```
+
+**2. `training.yaml` (The CronJob)**
+```yaml
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: training-job
+spec:
+  schedule: "0 2 * * 0" # Every Sunday at 2 AM
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+          - name: training
+            image: TRAINING_IMAGE_PLACEHOLDER
+            env:
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom: {secretKeyRef: {name: app-secrets, key: AWS_ACCESS_KEY_ID}}
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom: {secretKeyRef: {name: app-secrets, key: AWS_SECRET_ACCESS_KEY}}
+          restartPolicy: OnFailure
+```
+
+## 3.3 CI/CD Workflow (`.github/workflows/deploy-aks.yml`)
+
+```yaml
+name: Deploy to Azure AKS
 
 on:
-  workflow_run:
-    workflows: ["CI Pipeline"]
-    types: [completed]
+  push:
     branches: [main]
+
+env:
+  ACR_NAME: frauddetectionacr
+  RG: fraud-detection-rg
+  CLUSTER: fraud-aks-cluster
 
 jobs:
   deploy:
-    name: Deploy to Kubernetes
     runs-on: ubuntu-latest
-    if: ${{ github.event.workflow_run.conclusion == 'success' }}
-    environment: production
-    
     steps:
       - uses: actions/checkout@v4
       
-      - name: Set up kubectl
-        uses: azure/setup-kubectl@v3
-      
-      - name: Configure kubectl
-        run: |
-          mkdir -p ~/.kube
-          echo "${{ secrets.KUBE_CONFIG }}" | base64 -d > ~/.kube/config
-      
-      - name: Update inference deployment
-        run: |
-          kubectl set image deployment/inference-service \
-            inference=ghcr.io/${{ github.repository }}/fraud-inference:${{ github.sha }} \
-            -n fraud-detection-inference
-      
-      - name: Wait for rollout
-        run: |
-          kubectl rollout status deployment/inference-service \
-            -n fraud-detection-inference --timeout=300s
-      
-      - name: Verify deployment
-        run: |
-          # Get service endpoint
-          ENDPOINT=$(kubectl get ingress inference-ingress -n fraud-detection-inference -o jsonpath='{.spec.rules[0].host}')
-          
-          # Health check
-          curl -f https://${ENDPOINT}/health || exit 1
-          
-          echo "✅ Deployment successful!"
-      
-      - name: Notify on failure
-        if: failure()
-        run: |
-          # Rollback on failure
-          kubectl rollout undo deployment/inference-service -n fraud-detection-inference
-          echo "❌ Deployment failed, rolled back!"
+      # 1. Login & Connect
+      - uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+      - run: az acr login --name ${{ env.ACR_NAME }}
+      - uses: azure/aks-set-context@v3
+        with:
+          resource-group: ${{ env.RG }}
+          cluster-name: ${{ env.CLUSTER }}
+
+      # 2. Secrets
+      - run: |
+          kubectl create secret generic app-secrets \
+            --from-literal=AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID }} \
+            --from-literal=AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }} \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+      # 3. Build & Deploy Inference
+      - uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: docker/inference.Dockerfile
+          push: true
+          tags: ${{ env.ACR_NAME }}.azurecr.io/inference:${{ github.sha }}
+      - run: |
+          sed -i "s|IMAGE_PLACEHOLDER|${{ env.ACR_NAME }}.azurecr.io/inference:${{ github.sha }}|g" kubernetes/aks/inference.yaml
+          kubectl apply -f kubernetes/aks/inference.yaml
+
+      # 4. Build & Deploy Training
+      - uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: docker/training.Dockerfile
+          push: true
+          tags: ${{ env.ACR_NAME }}.azurecr.io/training:${{ github.sha }}
+      - run: |
+          sed -i "s|TRAINING_IMAGE_PLACEHOLDER|${{ env.ACR_NAME }}.azurecr.io/training:${{ github.sha }}|g" kubernetes/aks/training.yaml
+          kubectl apply -f kubernetes/aks/training.yaml
 ```
 
-## 5.4 Complete CD Workflow (EC2)
+---
+
+# Part 4: Deployment Strategy B - Microservices on AWS EKS
+
+**Goal**: Full system (Training + Inference) on AWS EKS using **Amazon ECR**.
+
+## 4.1 Infrastructure Setup (One-Time)
+```bash
+# 1. Create ECR Repos
+aws ecr create-repository --repository-name fraud-inference --region us-east-1
+aws ecr create-repository --repository-name fraud-training --region us-east-1
+
+# 2. Create EKS Cluster
+eksctl create cluster --name fraud-eks-cluster --region us-east-1 --nodes 2
+```
+
+## 4.2 Kubernetes Manifests (`kubernetes/eks/`)
+
+**1. `inference.yaml`**: Same as Azure, but add `imagePullSecrets` if needed or rely on IAM Roles for Service Accounts (IRSA).
+**2. `training.yaml`**: Same as Azure CronJob structure.
+
+## 4.3 CI/CD Workflow (`.github/workflows/deploy-eks.yml`)
 
 ```yaml
-# .github/workflows/deploy-ec2.yml
-name: Deploy to EC2
+name: Deploy to AWS EKS
 
 on:
-  workflow_run:
-    workflows: ["CI Pipeline"]
-    types: [completed]
+  push:
     branches: [main]
+
+env:
+  AWS_REGION: us-east-1
+  ECR_INFERENCE: fraud-inference
+  ECR_TRAINING: fraud-training
+  CLUSTER: fraud-eks-cluster
 
 jobs:
   deploy:
-    name: Deploy to EC2
     runs-on: ubuntu-latest
-    if: ${{ github.event.workflow_run.conclusion == 'success' }}
-    environment: production
-    
     steps:
-      - name: Deploy via SSH
-        uses: appleboy/ssh-action@v1.0.0
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
         with:
-          host: ${{ secrets.EC2_HOST }}
-          username: ec2-user
-          key: ${{ secrets.EC2_SSH_KEY }}
-          script: |
-            set -e
-            
-            echo "📦 Deploying new version..."
-            cd /home/ec2-user/fraud-detection
-            
-            # Login to container registry
-            echo ${{ secrets.GITHUB_TOKEN }} | docker login ghcr.io -u ${{ github.actor }} --password-stdin
-            
-            # Update image tag in docker-compose
-            export IMAGE_TAG=${{ github.sha }}
-            
-            # Pull new images
-            docker-compose pull
-            
-            # Start new containers (zero-downtime with health checks)
-            docker-compose up -d --remove-orphans
-            
-            # Wait for health check
-            echo "⏳ Waiting for health check..."
-            sleep 15
-            
-            # Verify
-            if curl -sf http://localhost:8000/health; then
-              echo "✅ Deployment successful!"
-            else
-              echo "❌ Health check failed, rolling back..."
-              docker-compose down
-              docker-compose up -d
-              exit 1
-            fi
-            
-            # Cleanup old images
-            docker image prune -af
-```
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+      - id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
 
-## 5.5 Required GitHub Secrets
+      # 1. Build & Push Inference
+      - env:
+          REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          TAG: ${{ github.sha }}
+        run: |
+          docker build -t $REGISTRY/$ECR_INFERENCE:$TAG -f docker/inference.Dockerfile .
+          docker push $REGISTRY/$ECR_INFERENCE:$TAG
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                         REQUIRED GITHUB SECRETS                              │
-│                                                                              │
-│   Go to: Repository → Settings → Secrets and variables → Actions            │
-│                                                                              │
-│   FOR KUBERNETES DEPLOYMENT:                                                 │
-│   ┌─────────────────────────────────────────────────────────────────────┐   │
-│   │                                                                      │   │
-│   │   KUBE_CONFIG       = Base64 encoded kubeconfig file                │   │
-│   │                       Run: cat ~/.kube/config | base64 | tr -d '\n'  │   │
-│   │                                                                      │   │
-│   └─────────────────────────────────────────────────────────────────────┘   │
-│                                                                              │
-│   FOR EC2 DEPLOYMENT:                                                        │
-│   ┌─────────────────────────────────────────────────────────────────────┐   │
-│   │                                                                      │   │
-│   │   EC2_HOST          = Your EC2 public IP or DNS                     │   │
-│   │                       Example: ec2-xx-xx-xx-xx.compute.amazonaws.com│   │
-│   │                                                                      │   │
-│   │   EC2_USER          = SSH username (usually ec2-user or ubuntu)     │   │
-│   │                                                                      │   │
-│   │   EC2_SSH_KEY       = Private SSH key content                       │   │
-│   │                       Run: cat ~/.ssh/your-key.pem                   │   │
-│   │                                                                      │   │
-│   └─────────────────────────────────────────────────────────────────────┘   │
-│                                                                              │
-│   FOR AWS (S3 Access):                                                       │
-│   ┌─────────────────────────────────────────────────────────────────────┐   │
-│   │                                                                      │   │
-│   │   AWS_ACCESS_KEY_ID     = Your AWS access key                       │   │
-│   │   AWS_SECRET_ACCESS_KEY = Your AWS secret key                       │   │
-│   │   AWS_REGION            = ap-south-1                                │   │
-│   │                                                                      │   │
-│   └─────────────────────────────────────────────────────────────────────┘   │
-│                                                                              │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
+      # 2. Build & Push Training
+      - env:
+          REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          TAG: ${{ github.sha }}
+        run: |
+          docker build -t $REGISTRY/$ECR_TRAINING:$TAG -f docker/training.Dockerfile .
+          docker push $REGISTRY/$ECR_TRAINING:$TAG
 
-## 5.6 Implementation Checklist
-
-```
-PHASE 1: CI Setup (Day 1-2)
-═══════════════════════════
-[ ] Create .github/workflows/ci.yml
-[ ] Add linting configuration (pyproject.toml for black, isort)
-[ ] Write basic tests in tests/
-[ ] Push and verify CI runs successfully
-[ ] Fix any linting/test failures
-
-PHASE 2: Docker Setup (Day 2-3)
-═══════════════════════════════
-[ ] Create docker/training.Dockerfile
-[ ] Create docker/inference.Dockerfile
-[ ] Create docker-compose.yml
-[ ] Test locally: docker-compose up
-[ ] Verify both services work
-
-PHASE 3: Container Registry (Day 3)
-════════════════════════════════════
-[ ] Enable GHCR for your repository
-[ ] Update workflows to build and push images
-[ ] Verify images appear in GitHub Packages
-
-PHASE 4: CD Setup (Day 4-5)
-═══════════════════════════
-[ ] Choose deployment target (K8s or EC2)
-[ ] Set up infrastructure (K8s cluster or EC2 instance)
-[ ] Add required secrets to GitHub
-[ ] Create deployment workflow
-[ ] Test deployment
-
-PHASE 5: Production Readiness (Day 5-7)
-═══════════════════════════════════════
-[ ] Add health check endpoints
-[ ] Configure proper logging
-[ ] Set up monitoring/alerting
-[ ] Document runbook for incidents
-[ ] Test rollback procedures
+      # 3. Deploy
+      - run: aws eks update-kubeconfig --name ${{ env.CLUSTER }} --region ${{ env.AWS_REGION }}
+      - env:
+          REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          TAG: ${{ github.sha }}
+        run: |
+          # Inject image names
+          sed -i "s|IMAGE_PLACEHOLDER|$REGISTRY/$ECR_INFERENCE:$TAG|g" kubernetes/eks/inference.yaml
+          sed -i "s|TRAINING_IMAGE_PLACEHOLDER|$REGISTRY/$ECR_TRAINING:$TAG|g" kubernetes/eks/training.yaml
+          
+          # Apply
+          kubectl apply -f kubernetes/eks/inference.yaml
+          kubectl apply -f kubernetes/eks/training.yaml
+          kubectl rollout restart deployment/inference-service
 ```
 
 ---
 
-## Summary
+# Part 5: Deployment Strategy C - Monolith Inference on AWS App Runner
 
+**Goal**: Simple, serverless deployment of **just the Inference API** using **Amazon ECR**.
+
+## 5.1 Architecture
+*   **Service**: AWS App Runner (Managed Container Service).
+*   **Scope**: Monolithic (Inference only). Training happens elsewhere or manually.
+
+## 5.2 CI/CD Workflow (`.github/workflows/deploy-apprunner.yml`)
+
+```yaml
+name: Deploy to AWS App Runner
+
+on: workflow_dispatch
+
+env:
+  AWS_REGION: us-east-1
+  ECR_REPO: fraud-inference
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+      - id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build & Push
+        env:
+          REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          TAG: ${{ github.sha }}
+        run: |
+          docker build -t $REGISTRY/$ECR_REPO:$TAG -f docker/inference.Dockerfile .
+          docker push $REGISTRY/$ECR_REPO:$TAG
+
+      - name: Deploy
+        uses: awslabs/amazon-app-runner-deploy@v1.2.0
+        with:
+          service: fraud-inference-service
+          image: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPO }}:${{ github.sha }}
+          access-role-arn: ${{ secrets.APP_RUNNER_ROLE_ARN }}
+          region: ${{ env.AWS_REGION }}
+          port: 8000
 ```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                           CI/CD SUMMARY                                      │
-│                                                                              │
-│   CONTINUOUS INTEGRATION (CI):                                               │
-│   • Runs on every push/PR                                                   │
-│   • Lints code, runs tests                                                  │
-│   • Builds Docker images                                                    │
-│   • Pushes to container registry                                            │
-│                                                                              │
-│   CONTINUOUS DEPLOYMENT (CD):                                                │
-│   • Runs after CI succeeds (on main branch)                                 │
-│   • Deploys to Kubernetes or EC2                                            │
-│   • Runs health checks                                                      │
-│   • Rolls back on failure                                                   │
-│                                                                              │
-│   WHERE IT FITS:                                                             │
-│   Code → CI (build/test) → Docker Images → CD (deploy) → Production        │
-│                                                                              │
-│   RECOMMENDATION FOR YOUR PROJECT:                                           │
-│   • Start with EC2 deployment (simpler)                                     │
-│   • Move to Kubernetes when you need scaling                                │
-│   • Use GitHub-hosted runners (no infrastructure to manage)                 │
-│                                                                              │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
-
----
-
-> **Ready to implement?** Let me know and I'll create the actual workflow files in your repository!

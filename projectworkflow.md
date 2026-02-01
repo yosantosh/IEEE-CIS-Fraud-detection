@@ -1145,6 +1145,41 @@ Kubernetes Pod:     Persistent Volume (via mount)
 
 ---
 
+
+
+# PHASE 10: Continues Integration(CI)
+
+## 10.1 : Code .github/workflows/c.yaml  
+          - This file will have script to run ci stage like when to trigger ci, which runner you are using, ect
+
+## 10.2 : Code test files
+          - we need to test if your api endpoint is working or not , config.py is in the format that we need. etc
+
+          - run test in local system :conda run -n mlops pytest tests/ (if env is not activated), if activated : pytest tests/
+          - add these test in ci stage by modifyng ci.yaml.
+          
+
+## 10.3 Build check :
+    - in this stage we have two either push:false (just build and check) or push:true (build and push the docker image)
+
+
+
+1. On Push (to main):
+
+CI Stage: Builds the image AND Pushes it to the registry.
+CD Stage: Does NOT push. It simply Pulls the existing image that the CI stage just created and deploys it.
+2. On Pull Request:
+
+CI Stage: Builds the image to verify it works, but does NOT Push it anywhere. (It discards the image immediately after the check).
+CD Stage: Typically does NOT run at all for Pull Requests.
+
+
+## 10.4 Add secrect in github actions secrests: 
+  - for dockerhub : name : DOCKERHUB_TOKEN
+  - for AWS ECR : name : AWS_ACCESS_KEY_ID , name: AWS_SECRET_ACCESS_KEY , name : AWS_REGION
+
+
+
 **Last Updated**: January 31, 2026
 **Author**: Santosh
 **Phase**: Dockerization completed with Training & Inference microservices
