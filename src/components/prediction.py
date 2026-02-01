@@ -455,11 +455,10 @@ class PredictionPipeline(Data_FE_Transformation):
         
         try:
             # Step 1: Reduce memory usage
-            logger.info("Step 1: Reducing memory usage...")
-            try:
-                df = reduce_memory(df)
-            except Exception as e:
-                logger.warning(f"Memory reduction failed (non-critical): {str(e)}")
+            # DISABLED for inference to prevent "int16 out of bounds" errors 
+            # when input data range differs from training assumptions.
+            logger.info("Step 1: Skipping memory reduction (Inference Mode)")
+            # df = reduce_memory(df)
             
             # Step 2: Transaction Amount Features (inherited)
             logger.info("Step 2: Creating transaction amount features...")
@@ -467,7 +466,12 @@ class PredictionPipeline(Data_FE_Transformation):
             
             # Step 3: Time Features (inherited)
             logger.info("Step 3: Creating time features...")
-            df = self.create_time_features(df)
+            try:
+                # Ensure TransactionDT is numeric before time features
+                df['TransactionDT'] = pd.to_numeric(df['TransactionDT'], errors='coerce')
+                df = self.create_time_features(df)
+            except Exception as e:
+                logger.warning(f"Time features failed: {str(e)}")
             
             # Step 4: Card Features (inherited)
             logger.info("Step 4: Creating card features...")

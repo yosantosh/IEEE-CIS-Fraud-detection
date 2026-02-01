@@ -123,7 +123,7 @@ class Data_FE_Transformation:
             df['Transaction_hour'],
             bins=self.config.time_of_day_bins,
             labels=self.config.time_of_day_labels
-        ).astype(int)
+        ).fillna(-1).astype(int)
 
         # -------------------------
         # Binary behavior flags
