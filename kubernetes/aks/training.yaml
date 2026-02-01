@@ -24,6 +24,11 @@ spec:
               valueFrom: {secretKeyRef: {name: app-secrets, key: AWS_ACCESS_KEY_ID}}
             - name: AWS_SECRET_ACCESS_KEY
               valueFrom: {secretKeyRef: {name: app-secrets, key: AWS_SECRET_ACCESS_KEY}}
+            # DagsHub Auth
+            - name: DAGSHUB_TOKEN
+              valueFrom: {secretKeyRef: {name: app-secrets, key: DAGSHUB_TOKEN}}
+            - name: MLFLOW_TRACKING_PASSWORD
+              valueFrom: {secretKeyRef: {name: app-secrets, key: DAGSHUB_TOKEN}}
             resources:
               requests:
                 cpu: "500m"
