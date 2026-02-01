@@ -1175,9 +1175,8 @@ CD Stage: Typically does NOT run at all for Pull Requests.
 
 
 ## 10.4 Add secrect in github actions secrests: 
-  - for dockerhub : name : santoshsoni4
-  - for AWS ECR : name : AWS_ACCESS_KEY_ID , name: AWS_SECRET_ACCESS_KEY , name : AWS_REGION
-
+  - for dockerhub : DOCKERHUB_USERNAME : santoshsoni4 , DOCKERHUB_TOKEN: tocken
+  - for AWS ECR : AWS_ACCESS_KEY_ID:value , AWS_SECRET_ACCESS_KEY:value , AWS_REGION:value
 
 
 **Last Updated**: January 31, 2026
