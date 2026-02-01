@@ -355,12 +355,15 @@ kubectl port-forward svc/inference-service 8000:8000
 ```
 *(Then you can request `localhost:8000/predict` in Postman!)*
 
-### Step 5: Continuous Deployment (CD) Workflow
-Create a NEW file `.github/workflows/deploy-aks.yml` that runs manually or after CI.
+### Step 5: Continuous Deployment (CD) Workflows
+We use a **Dual-Workflow Strategy** to give you both automation and control.
 
-**The Workflow Code (`.github/workflows/deploy-aks.yml`):**
+1.  **`ci_azure.yml` (Auto)**: logic is "Push to Main -> Auto Test -> Auto Build -> Auto Deploy".
+2.  **`manual_deploy_aks.yml` (Manual Control)**: logic is "I want to fix secrets, rollback, or manually deploy a specific tag without rebuilding".
+
+**The Manual Workflow Code (`.github/workflows/manual_deploy_aks.yml`):**
 ```yaml
-name: Deploy to Azure AKS
+name: Manual Deploy/Fix - Azure AKS
 
 on:
   workflow_dispatch:

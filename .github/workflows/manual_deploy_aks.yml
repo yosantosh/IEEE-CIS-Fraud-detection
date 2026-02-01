@@ -1,4 +1,4 @@
-name: Deploy to Azure AKS
+name: Manual Deploy/Fix - Azure AKS
 # This workflow is focused SOLELY on Deployment.
 # It can be triggered manually or could be configured to run after a successful CI run.
 
