@@ -55,11 +55,7 @@ services:
       # DagsHub/MLflow (if using)
       - DAGSHUB_TOKEN=${DAGSHUB_TOKEN:-}
       - MLFLOW_TRACKING_URI=${MLFLOW_TRACKING_URI:-}
-    volumes:
-      # Mount artifacts for inspection after training
-      - ./artifacts:/app/artifacts
-      - ./models:/app/models
-      - ./logs:/app/logs
+
     # Training runs once and exits (not a long-running service)
     restart: "no"
 
