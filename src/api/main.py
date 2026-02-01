@@ -203,9 +203,13 @@ async def predict_batch(request: BatchPredictionRequest):
     """
     Batch fraud prediction endpoint.
     
-    Accepts a list of transactions (flexible schema) and returns predictions.
-    Performs case-insensitive column matching to ensure robustness.
+    Performs 'Smart' schema validation:
+    1. Case-insensitive column matching.
+    2. Data type validation using Pydantic (returns 422 on failure).
+    3. Missing column handling (fills with defaults).
     """
+    from pydantic import ValidationError
+    
     if prediction_pipeline is None or prediction_pipeline.model is None:
         raise HTTPException(
             status_code=503, 
@@ -221,28 +225,42 @@ async def predict_batch(request: BatchPredictionRequest):
     try:
         logger.info(f"Received batch prediction request with {len(request.transactions)} transactions")
         
-        # 1. Convert Dictionary list to DataFrame (Flexible Input)
-        df = pd.DataFrame(request.transactions)
-        
-        # 2. Smart Schema Normalization (Case-Insensitive Mapping)
-        # Create a map of {lowercase_key: correct_key} from the Reference Model
+        # --- PHASE 1: SMART MAPPING & VALIDATION ---
+        validated_transactions = []
         reference_keys = TransactionInput.model_fields.keys()
         key_map = {k.lower(): k for k in reference_keys}
         
-        # Rename columns in the DF if they match a known key case-insensitively
-        new_columns = {}
-        for col in df.columns:
-            col_lower = str(col).lower().strip()
-            if col_lower in key_map:
-                new_columns[col] = key_map[col_lower]
+        for idx, raw_tx in enumerate(request.transactions):
+            # Normalize keys (casing)
+            normalized_tx = {}
+            for k, v in raw_tx.items():
+                k_norm = k.lower().strip()
+                if k_norm in key_map:
+                    normalized_tx[key_map[k_norm]] = v
+                else:
+                    normalized_tx[k] = v # Keep extra columns as-is
+            
+            # Explicit Pydantic Validation (The 'Genuine' Fix)
+            try:
+                # This ensures data types are correct (e.g. TransactionAmt is float, not 'abc')
+                tx_obj = TransactionInput(**normalized_tx)
+                validated_transactions.append(tx_obj.model_dump())
+            except ValidationError as ve:
+                logger.error(f"Validation failed for transaction index {idx}: {ve.json()}")
+                raise HTTPException(
+                    status_code=422,
+                    detail={
+                        "message": f"Validation failed at index {idx}",
+                        "errors": ve.errors()
+                    }
+                )
         
-        if new_columns:
-            logger.info(f"Normalizing {len(new_columns)} column names (e.g., {list(new_columns.items())[:3]}...)")
-            df.rename(columns=new_columns, inplace=True)
+        # --- PHASE 2: PREDICTION ---
+        df = pd.DataFrame(validated_transactions)
         
-        # 3. Ensure TransactionID exists
-        if 'TransactionID' not in df.columns:
-            logger.warning("'TransactionID' not found in input, generating sequential IDs.")
+        # Ensure TransactionID exists (Pydantic might have set it to None if optional)
+        if 'TransactionID' not in df.columns or df['TransactionID'].isnull().all():
+            logger.warning("TransactionID missing or null, generating sequential IDs.")
             df['TransactionID'] = range(1, len(df) + 1)
         
         # Run prediction pipeline
@@ -269,13 +287,10 @@ async def predict_batch(request: BatchPredictionRequest):
             fraud_rate=round(fraud_rate, 2)
         )
         
+    except HTTPException:
+        raise # Re-raise validation errors
     except Exception as e:
         logger.error(f"Prediction failed: {str(e)}")
-        # Log the first few rows of input to help debug
-        try:
-             logger.error(f"Input Data Sample: {request.transactions[:1]}")
-        except:
-             pass
         raise HTTPException(
             status_code=500,
             detail=f"Prediction failed: {str(e)}"
