@@ -116,7 +116,7 @@ We have upgraded this pipeline to follow the **Build Once, Deploy Many** pattern
 2.  **Merge to Main**: Build the image **once** and push it to the registry (Docker Hub).
 3.  **CD**: The deployment stages (CD) simply **pull** this exact image using its SHA tag. This guarantees that what you verified in CI is *exactly* what runs in production.
 
-*(Note: Ensure you have `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` added to your GitHub Repository Secrets)*
+<!-- *(Note: Ensure you have `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` added to your GitHub Repository Secrets)* -->
 
 ## 2.3 Alternative: CI using AWS ECR
 If you prefer using **AWS Elastic Container Registry (ECR)** instead of Docker Hub, use this configuration for the `build-and-push` job.

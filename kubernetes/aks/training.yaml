@@ -1,0 +1,50 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: training-job
+spec:
+  # Manual Run Strategy: Set schedule to an invalid/impossible date or distant future
+  # This effectively disables the automatic trigger.
+  # To run manually: kubectl create job --from=cronjob/training-job manual-training-001
+  schedule: "0 0 31 2 *" # February 31st (Never happens)
+  jobTemplate:
+    spec:
+      # "Replica" Control for Jobs
+      parallelism: 1    # Run 1 pod at a time (Min)
+      completions: 1    # Finish after 1 successful run
+      backoffLimit: 2   # Retry 2 times (Max "attempts" effectively)
+      
+      template:
+        spec:
+          containers:
+          - name: training
+            image: TRAINING_IMAGE_PLACEHOLDER
+            env:
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom: {secretKeyRef: {name: app-secrets, key: AWS_ACCESS_KEY_ID}}
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom: {secretKeyRef: {name: app-secrets, key: AWS_SECRET_ACCESS_KEY}}
+            resources:
+              requests:
+                cpu: "500m"
+                memory: "1Gi"
+          restartPolicy: OnFailure
+          
+          # "Master Node" Preference
+          # Note: In managed AKS, you usually cannot schedule on the actual control plane.
+          # We use a toleration here to show how one would target restricted nodes.
+          tolerations:
+          - key: "node-role.kubernetes.io/master"
+            operator: "Exists"
+            effect: "NoSchedule"
+          # Or try to prefer a 'system' node pool if it exists
+          affinity:
+            nodeAffinity:
+              preferredDuringSchedulingIgnoredDuringExecution:
+              - weight: 1
+                preference:
+                  matchExpressions:
+                  - key: agentpool
+                    operator: In
+                    values:
+                    - system
