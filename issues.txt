@@ -1,0 +1,10 @@
+1:manual deploy AKS not working maybe, in every push full cicd azure pipeline get runned this is problem
+
+2: Inspect full code for each components and look how config.py configs are used
+
+3: inspect and play with azure AKS==k8s using command wrote in manage_AKS.md
+
+4: Alearting : Integation of Prometheus + gufana(visualization)
+
+5: Stress testing : fire many fake request from postman to check load balancing
+     of Azure Aks load balancer and our stratedy to script aks yamle files

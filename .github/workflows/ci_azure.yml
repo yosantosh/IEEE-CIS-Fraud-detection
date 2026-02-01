@@ -1,5 +1,5 @@
 # CI/CD: Azure AKS + ACR Strategy
-name: CI/CD - Azure (AKS+ACR)
+name: CI - Azure (Build & Push Only)
 
 on:
   push:
@@ -75,45 +75,4 @@ jobs:
           push: true
           tags: ${{ env.ACR_NAME }}.azurecr.io/fraud-inference:${{ github.sha }}, ${{ env.ACR_NAME }}.azurecr.io/fraud-inference:latest
 
-  # ------------------------------------------------------------------
-  # JOB 3: DEPLOY TO AKS
-  # ------------------------------------------------------------------
-  deploy-aks:
-    name: Deploy to AKS
-    needs: build-and-push-azure
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      
-      # 1. Login to Azure
-      - uses: azure/login@v1
-        with:
-          creds: ${{ secrets.AZURE_CREDENTIALS }}
-      
-      # 2. Set K8s Context
-      - uses: azure/aks-set-context@v3
-        with:
-          resource-group: ${{ env.RG }}
-          cluster-name: ${{ env.CLUSTER }}
 
-      # 3. Create Secrets in K8s (for S3 access inside the pods)
-      - name: Create Secrets
-        run: |
-          kubectl create secret generic app-secrets \
-            --from-literal=AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID }} \
-            --from-literal=AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }} \
-            --dry-run=client -o yaml | kubectl apply -f -
-
-      # 4. Deploy Inference
-      - name: Deploy Inference Service
-        run: |
-          # Replace placeholder with actual image
-          sed -i "s|IMAGE_PLACEHOLDER|${{ env.ACR_NAME }}.azurecr.io/fraud-inference:${{ github.sha }}|g" kubernetes/aks/inference.yaml
-          kubectl apply -f kubernetes/aks/inference.yaml
-
-      # 5. Deploy Training CronJob
-      - name: Deploy Training Job
-        run: |
-          # Replace placeholder with actual image
-          sed -i "s|TRAINING_IMAGE_PLACEHOLDER|${{ env.ACR_NAME }}.azurecr.io/fraud-training:${{ github.sha }}|g" kubernetes/aks/training.yaml
-          kubectl apply -f kubernetes/aks/training.yaml
