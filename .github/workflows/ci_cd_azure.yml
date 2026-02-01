@@ -1,0 +1,128 @@
+name: CI/CD - Azure (Full Pipeline)
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      deploy_target:
+        description: 'Deploy to AKS?'
+        required: true
+        default: 'yes'
+        type: choice
+        options:
+        - 'yes'
+        - 'no'
+
+env:
+  ACR_NAME: mlopsfraud
+  RG: fraud-detection-rg
+  CLUSTER: fraud-aks-cluster
+
+jobs:
+  # ------------------------------------------------------------------
+  # JOB 1: QUALITY & TEST
+  # ------------------------------------------------------------------
+  test:
+    name: 🧪 Code Quality & Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: 'pip'
+      - run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-cov flake8 httpx
+      - name: 🔍 Lint Code
+        run: |
+          # Warning only mode to match DockerHub pipeline
+          flake8 src/ tests/ --count --select=E9,F63,F7,F82 --show-source --statistics
+          flake8 src/ tests/ --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+      - name: 🧪 Run Unit Tests
+        run: pytest tests/ -v --cov=src --cov-report=xml
+
+  # ------------------------------------------------------------------
+  # JOB 2: BUILD & PUSH TO AZURE ACR
+  # ------------------------------------------------------------------
+  build-and-push-azure:
+    name: 🐳 Build & Push (Azure)
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Azure Login
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+      
+      - name: ACR Login
+        run: az acr login --name ${{ env.ACR_NAME }}
+      
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build & Push Training
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: docker/training.Dockerfile
+          push: true
+          # Tag with SHA (for tracking) and Latest (for ease of use)
+          tags: ${{ env.ACR_NAME }}.azurecr.io/fraud-training:${{ github.sha }}, ${{ env.ACR_NAME }}.azurecr.io/fraud-training:latest
+
+      - name: Build & Push Inference
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: docker/inference.Dockerfile
+          push: true
+          tags: ${{ env.ACR_NAME }}.azurecr.io/fraud-inference:${{ github.sha }}, ${{ env.ACR_NAME }}.azurecr.io/fraud-inference:latest
+
+  # ------------------------------------------------------------------
+  # JOB 3: DEPLOY TO AKS
+  # ------------------------------------------------------------------
+  deploy-aks:
+    name: � Deploy to AKS
+    needs: build-and-push-azure
+    runs-on: ubuntu-latest
+    # Only run if push to main OR manual trigger says yes
+    if: github.event_name == 'push' || github.event.inputs.deploy_target == 'yes'
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Azure Login
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+      
+      - name: Set AKS Context
+        uses: azure/aks-set-context@v3
+        with:
+          resource-group: ${{ env.RG }}
+          cluster-name: ${{ env.CLUSTER }}
+
+      # Create/Update Secrets (Including DagsHub Token for Training)
+      - name: Update App Secrets
+        run: |
+          kubectl create secret generic app-secrets \
+            --from-literal=AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID }} \
+            --from-literal=AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }} \
+            --from-literal=DAGSHUB_TOKEN=${{ secrets.DAGSHUB_TOKEN }} \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+      # Deploy Inference Service using the SHA tag we just built
+      - name: Deploy Inference
+        run: |
+          sed -i "s|IMAGE_PLACEHOLDER|${{ env.ACR_NAME }}.azurecr.io/fraud-inference:${{ github.sha }}|g" kubernetes/aks/inference.yaml
+          kubectl apply -f kubernetes/aks/inference.yaml
+          # Force restart to ensure new code is picked up
+          kubectl rollout restart deployment/inference-service
+
+      # Deploy/Update Training Job (Manual Trigger Setup)
+      - name: Deploy Training Job
+        run: |
+          sed -i "s|TRAINING_IMAGE_PLACEHOLDER|${{ env.ACR_NAME }}.azurecr.io/fraud-training:${{ github.sha }}|g" kubernetes/aks/training.yaml
+          kubectl apply -f kubernetes/aks/training.yaml
