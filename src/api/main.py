@@ -205,7 +205,7 @@ async def predict_batch(request: BatchPredictionRequest):
     
     Accepts a list of transactions and returns predictions with TransactionID and isFraud.
     """
-    global prediction_pipeline
+    # prediction_pipeline is defined at module level and only read here, so global keyword is not needed and triggers flake8 F824
     
     if prediction_pipeline is None or prediction_pipeline.model is None:
         raise HTTPException(

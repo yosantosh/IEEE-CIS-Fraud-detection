@@ -818,14 +818,7 @@ class Data_FE_Transformation:
         
         
         try:
-             # Step 14: Reduce memory usage
-            logger.info("Step 14: Reducing memory usage...")
-            try:
-                df = reduce_memory(df)
-                logger.info("✓ Memory optimized successfully")
-            except Exception as e:
-                logger.warning(f"Memory reduction failed (non-critical): {str(e)}")
-                
+
             # Step 1: Read raw data
             logger.info("Step 1: Reading ingested .csv file...")
             try:
