@@ -9,6 +9,7 @@ Usage:
 
 import os
 import sys
+import yaml
 from typing import List, Dict, Any, Optional
 from contextlib import asynccontextmanager
 
@@ -228,6 +229,34 @@ async def predict_batch(request: BatchPredictionRequest):
         # Ensure TransactionID exists
         if 'TransactionID' not in df.columns:
             df['TransactionID'] = range(1, len(df) + 1)
+        
+        # [AUTOPATCH] Load schema to identify missing columns and fill them with None (permisssive mode)
+        pred_config = PredictionConfig()
+        if os.path.exists(pred_config.schema_yaml_path):
+            try:
+                with open(pred_config.schema_yaml_path, 'r') as f:
+                    schema_data = yaml.safe_load(f) or {}
+                
+                if pred_config.raw_schema_name in schema_data:
+                    raw_schema = schema_data[pred_config.raw_schema_name]
+                    # Get list of expected columns
+                    expected_cols = list(raw_schema.keys())
+                    
+                    # Exclude target column
+                    if pred_config.target_column in expected_cols:
+                        expected_cols.remove(pred_config.target_column)
+                    
+                    # Identify missing columns
+                    missing_cols = [c for c in expected_cols if c not in df.columns]
+                    
+                    if missing_cols:
+                        logger.info(f"Filling {len(missing_cols)} missing columns (schema mismatch) with None for inference")
+                        # Add missing columns efficiently
+                        # Using pd.concat or reindex might be cleaner but assigning None works
+                        for col in missing_cols:
+                            df[col] = None
+            except Exception as e:
+                 logger.warning(f"Schema auto-fill failed: {e}")
         
         # Run prediction pipeline
         result_df = prediction_pipeline.predict(df)
