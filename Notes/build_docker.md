@@ -181,6 +181,18 @@ docker build -t fraud-training -f docker/training.Dockerfile .
 
 # Build Inference
 docker build -t fraud-inference -f docker/inference.Dockerfile .
+
+### Cloud Building (No Docker Daemon Required)
+You can build images directly in Azure using your local source code. This zips your current directory, uploads it to Azure, and builds it there using your local scripts.
+
+```bash
+# Build Training in Cloud
+az acr build --registry mlopsfraud --image fraud-training:latest --file docker/training.Dockerfile .
+
+# Build Inference in Cloud
+az acr build --registry mlopsfraud --image fraud-inference:latest --file docker/inference.Dockerfile .
+```
+*Note: The `.` at the end specifies the build context (your current folder).*
 ```
 
 ### Running Inference Locally

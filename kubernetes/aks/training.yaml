@@ -18,7 +18,7 @@ spec:
         spec:
           containers:
           - name: training
-            image: TRAINING_IMAGE_PLACEHOLDER
+            image: mlopsfraud.azurecr.io/fraud-training:latest
             env:
             - name: AWS_ACCESS_KEY_ID
               valueFrom: {secretKeyRef: {name: app-secrets, key: AWS_ACCESS_KEY_ID}}
@@ -32,8 +32,9 @@ spec:
             resources:
               requests:
                 cpu: "500m"
-                memory: "1Gi"
-            #   limits:
+                memory: "4Gi"
+              limits:
+                memory: "4Gi"
             #     nvidia.com/gpu: 1
           restartPolicy: OnFailure
           
