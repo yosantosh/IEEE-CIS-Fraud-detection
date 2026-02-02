@@ -48,9 +48,9 @@ class DataIngestionConfig:
     raw_data_path: str = "artifacts/data/raw/raw_data.csv"
     schema_yaml_path: str = "config/schema.yaml"
     
-    # Row limit for reading data (None = read all rows, set to int for sampling)
+    # Row limit for reading data (None = read all rows, set to int for fixed rows, float for percentage)
     # Useful for development/testing with large datasets
-    nrows: Optional[int] = 5000  # e.g., 10000 for quick testing, None for full dataset
+    nrows: Optional[float] = 1.0  # e.g., 5000 (int) or 0.1 (10% sample), None for full
     
     # S3 settings (from environment variables)
     bucket_name: str = os.getenv("S3_BUCKET_NAME", "mlops-capstone-project-final")

@@ -1,6 +1,7 @@
 import os
 import pandas as pd
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Union
+import random
 
 from src.logger import logger
 
@@ -114,10 +115,21 @@ class Fetch_data:
             
             # For CSV with nrows, stream directly to pandas to avoid downloading entire file
             # This is critical for large datasets where we only need a sample
+            # For CSV with nrows, stream directly to pandas to avoid downloading entire file
+            # This is critical for large datasets where we only need a sample
             nrows = read_kwargs.get('nrows')
             if file_format.lower() == "csv" and nrows is not None:
-                logger.info(f"Streaming CSV with nrows={nrows} (NOT downloading full file)")
-                # Use the streaming body directly - pandas will stop reading after nrows
+                # Handle percentage-based sampling (float between 0 and 1)
+                if isinstance(nrows, float) and 0.0 < nrows <= 1.0:
+                    logger.info(f"Sampling {nrows*100:.1f}% of data from S3 stream")
+                    # Remove nrows from kwargs as read_csv expects int
+                    read_kwargs.pop('nrows', None)
+                    # Use skiprows to randomly sample (keep header)
+                    read_kwargs['skiprows'] = lambda i: i > 0 and random.random() > nrows
+                else:
+                    logger.info(f"Streaming CSV with nrows={nrows} (NOT downloading full file)")
+                
+                # Use the streaming body directly
                 df = pd.read_csv(response['Body'], **read_kwargs)
             else:
                 # For other formats or full reads, download entire file first
@@ -678,6 +690,12 @@ class Fetch_data:
             logger.info(f"Loading data from local file: {file_path}")
             
             if file_format.lower() == "csv":
+                nrows = read_kwargs.get('nrows')
+                if isinstance(nrows, float) and 0.0 < nrows <= 1.0:
+                    logger.info(f"Sampling {nrows*100:.1f}% of data from local file")
+                    read_kwargs.pop('nrows', None)
+                    read_kwargs['skiprows'] = lambda i: i > 0 and random.random() > nrows
+                
                 df = pd.read_csv(file_path, **read_kwargs)
             elif file_format.lower() == "parquet":
                 df = pd.read_parquet(file_path, **read_kwargs)

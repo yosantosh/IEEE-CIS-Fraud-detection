@@ -53,7 +53,7 @@ class DataIngestion:
         logger.info("Fetching data from S3...")
         
         if self.config.nrows:
-            logger.info(f"Reading only {self.config.nrows} rows (nrows limit set)")
+            logger.info(f"Reading subset of data: {self.config.nrows} (nrows/percentage)")
         
         # AWS credentials from environment
         aws_creds = {
@@ -91,7 +91,7 @@ class DataIngestion:
         logger.info("Fetching data from local files...")
         
         if self.config.nrows:
-            logger.info(f"Reading only {self.config.nrows} rows (nrows limit set)")
+            logger.info(f"Reading subset of data: {self.config.nrows} (nrows/percentage)")
         
         df_transaction = Fetch_data.fetch_data_from_local(
             file_path=transaction_path,
@@ -246,17 +246,22 @@ def main():
                         help="Local path to transaction data")
     parser.add_argument("--identity-path", type=str, default="data/train_identity.csv",
                         help="Local path to identity data")
-    parser.add_argument("--nrows", type=int, default=None,
-                        help="Number of rows to read (None = all rows). Useful for testing.")
+    parser.add_argument("--nrows", type=float, default=None,
+                        help="Number of rows (int) or percentage (float <= 1.0) to read.")
     
     args = parser.parse_args()
     
     # Create config - use CLI nrows if provided, otherwise use class default (10000)
     if args.nrows is not None:
-        config = DataIngestionConfig(nrows=args.nrows)
-        logger.info(f"Using CLI-specified nrows: {args.nrows}")
+        nrows_val = args.nrows
+        # If input is > 1.0, treat as integer row count (e.g. 5000.0 -> 5000)
+        if nrows_val > 1.0:
+            nrows_val = int(nrows_val)
+            
+        config = DataIngestionConfig(nrows=nrows_val)
+        logger.info(f"Using CLI-specified nrows: {nrows_val}")
     else:
-        config = DataIngestionConfig()  # Uses default nrows=10000
+        config = DataIngestionConfig()  # Uses default
         logger.info(f"Using default nrows: {config.nrows}")
     
     # Run pipeline
