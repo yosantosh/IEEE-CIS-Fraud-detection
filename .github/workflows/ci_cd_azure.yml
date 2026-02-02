@@ -24,7 +24,7 @@ jobs:
   # JOB 1: QUALITY & TEST
   # ------------------------------------------------------------------
   test:
-    name: 🧪 Code Quality & Tests
+    name: 🧪Code Quality & Tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -48,7 +48,7 @@ jobs:
   # JOB 2: BUILD & PUSH TO AZURE ACR
   # ------------------------------------------------------------------
   build-and-push-azure:
-    name: 🐳 Build & Push (Azure)
+    name: Build & Push (Azure)
     needs: test
     runs-on: ubuntu-latest
     steps:
@@ -85,7 +85,7 @@ jobs:
   # JOB 3: DEPLOY TO AKS
   # ------------------------------------------------------------------
   deploy-aks:
-    name: � Deploy to AKS
+    name: Deploy to AKS
     needs: build-and-push-azure
     runs-on: ubuntu-latest
     # Only run if push to main OR manual trigger says yes

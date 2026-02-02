@@ -23,7 +23,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, ValidationError, model_validator
 
 from src.logger import logger
 from src.components.prediction import PredictionPipeline
@@ -36,6 +36,25 @@ from config.config import PredictionConfig
 
 class TransactionInput(BaseModel):
     """Single transaction input model."""
+    model_config = ConfigDict(extra="allow")  # Allow extra fields for V columns and id columns
+
+    @model_validator(mode='before')
+    @classmethod
+    def clean_empty_strings(cls, data: Any) -> Any:
+        """
+        Smart Validator:
+        Converts empty strings, "null", "nan" to None.
+        This allows robust handling of inference data (which may have empty strings)
+        while still enforcing strict types for non-empty values (satisfying CI tests).
+        """
+        if isinstance(data, dict):
+            for k, v in data.items():
+                if isinstance(v, str):
+                    v_clean = v.strip().lower()
+                    if v_clean == "" or v_clean == "null" or v_clean == "nan":
+                        data[k] = None
+        return data
+    
     TransactionID: Optional[int] = None
     TransactionDT: Optional[int] = None
     TransactionAmt: Optional[float] = None
@@ -93,11 +112,8 @@ class TransactionInput(BaseModel):
     M7: Optional[str] = None
     M8: Optional[str] = None
     M9: Optional[str] = None
-    
-    class Config:
-        extra = "allow"  # Allow extra fields for V columns and id columns
 
-
+# ... inside predict_batch function ...
 class BatchPredictionRequest(BaseModel):
     """Batch prediction request model."""
     transactions: List[Dict[str, Any]]
@@ -214,7 +230,7 @@ async def predict_batch(request: BatchPredictionRequest):
     2. Data type validation using Pydantic (returns 422 on failure).
     3. Missing column handling (fills with defaults).
     """
-    from pydantic import ValidationError
+
     
     if prediction_pipeline is None or prediction_pipeline.model is None:
         raise HTTPException(
@@ -246,9 +262,19 @@ async def predict_batch(request: BatchPredictionRequest):
                 else:
                     normalized_tx[k] = v # Keep extra columns as-is
             
-            # Skip strict Pydantic validation to allow raw data through
-            # The PredictionPipeline handles type coercion and missing values robustly
-            validated_transactions.append(normalized_tx)
+            # --- VALIDATION ---
+            # Strictly validate types using the Pydantic model.
+            # This ensures "garbage" strings for numeric fields trigger a 422 Error.
+            try:
+                validated_item = TransactionInput(**normalized_tx)
+                # Convert back to dict for DataFrame processing
+                validated_transactions.append(validated_item.model_dump()) 
+            except ValidationError as e:
+                logger.warning(f"Validation failed for row {idx}: {e}")
+                raise HTTPException(
+                    status_code=422, 
+                    detail=f"Validation error in row {idx}: {e.errors()}"
+                )
         
         # --- PHASE 2: PREDICTION ---
         df = pd.DataFrame(validated_transactions)
