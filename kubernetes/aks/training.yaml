@@ -33,16 +33,16 @@ spec:
               requests:
                 cpu: "500m"
                 memory: "1Gi"
-              limits:
-                nvidia.com/gpu: 1
+            #   limits:
+            #     nvidia.com/gpu: 1
           restartPolicy: OnFailure
           
           # Targeted T4 GPU Node Selection
-          nodeSelector:
-            accelerator: nvidia-tesla-t4
+          # nodeSelector:
+          #   accelerator: nvidia-tesla-t4
           # Tolerations for GPU taints if necessary (common in AKS)
-          tolerations:
-          - key: "sku"
-            operator: "Equal"
-            value: "gpu"
-            effect: "NoSchedule"
+          # tolerations:
+          # - key: "sku"
+          #   operator: "Equal"
+          #   value: "gpu"
+          #   effect: "NoSchedule"
