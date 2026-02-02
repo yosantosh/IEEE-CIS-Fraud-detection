@@ -231,3 +231,22 @@ az acr repository delete --name mlopsfraud --image fraud-inference:old-tag-sha -
 - **Port Forward**: Test a service locally without exposing it to the internet:
   `kubectl port-forward svc/inference-service 8000:80`
   *(Then access localhost:8000)*
+
+
+
+
+---
+
+## 🚀 10. Manually Trigger Training Job
+*Run the training pipeline on-demand anywhere (even if scheduled).*
+
+```bash
+# Create a one-off job from the CronJob template
+kubectl create job --from=cronjob/training-job manual-training-001
+```
+
+*To check progress:*
+```bash
+kubectl get pods
+kubectl logs manual-training-001-xxxxx -f
+```

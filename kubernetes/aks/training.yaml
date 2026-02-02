@@ -33,23 +33,16 @@ spec:
               requests:
                 cpu: "500m"
                 memory: "1Gi"
+              limits:
+                nvidia.com/gpu: 1
           restartPolicy: OnFailure
           
-          # "Master Node" Preference
-          # Note: In managed AKS, you usually cannot schedule on the actual control plane.
-          # We use a toleration here to show how one would target restricted nodes.
+          # Targeted T4 GPU Node Selection
+          nodeSelector:
+            accelerator: nvidia-tesla-t4
+          # Tolerations for GPU taints if necessary (common in AKS)
           tolerations:
-          - key: "node-role.kubernetes.io/master"
-            operator: "Exists"
+          - key: "sku"
+            operator: "Equal"
+            value: "gpu"
             effect: "NoSchedule"
-          # Or try to prefer a 'system' node pool if it exists
-          affinity:
-            nodeAffinity:
-              preferredDuringSchedulingIgnoredDuringExecution:
-              - weight: 1
-                preference:
-                  matchExpressions:
-                  - key: agentpool
-                    operator: In
-                    values:
-                    - system
