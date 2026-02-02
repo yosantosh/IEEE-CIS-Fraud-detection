@@ -4,6 +4,11 @@ Model Training & Evaluation Component for IEEE-CIS Fraud Detection Pipeline
 This module handles model training with MLflow integration, schema validation,
 evaluation on both train and test sets, and proper model versioning/saving.
 
+Version Determination:
+    - Checks S3 for existing model folders like "XGBClassifier_v1", "XGBClassifier_v2"
+    - Splits folder name by "_" and gets version from last part
+    - Creates next version folder locally and uploads to S3
+
 Usage with DVC:
     dvc repro model_training
 """
@@ -12,8 +17,10 @@ import os
 import sys
 import json
 import joblib
+import shutil
 from pathlib import Path
 from typing import Optional, Dict, Any, Tuple
+from datetime import datetime
 
 # Load environment variables from .env FIRST (before any imports that use them)
 from dotenv import load_dotenv
@@ -336,17 +343,21 @@ class ModelTraining:
         try:
             # DagsHub MLflow tracking is already initialized at module level
             
-            # Create or get experiment
-            mlflow.set_experiment(self.config.experiment_name)
+            # Create or get experiment - USE TODAY'S DATE as experiment name
+            today_date = datetime.now().strftime("%Y-%m-%d")
+            experiment_name = f"fraud_detection_{today_date}"
+            mlflow.set_experiment(experiment_name)
             
             # Enable autologging for XGBoost
+            # Using registered_model_name to avoid artifact_path deprecation warning
             mlflow.xgboost.autolog(
                 log_input_examples=True,
                 log_model_signatures=True,
-                log_models=True
+                log_models=True,
+                registered_model_name="XGBClassifier_fraud_detection"
             )
             
-            logger.info(f"MLflow experiment: {self.config.experiment_name}")
+            logger.info(f"MLflow experiment: {experiment_name} (today's date)")
             logger.info(f"Model parameters: {self.model_params}")
             
             with mlflow.start_run(run_name=self.config.run_name) as run:
@@ -434,16 +445,21 @@ class ModelTraining:
             raise CustomException(e, sys)
 
     def save_model(self, model: Optional[XGBClassifier] = None, 
-                   model_name: str = "XGBClassifier") -> str:
+                   model_name: Optional[str] = None) -> Tuple[str, int]:
         """
         Save trained model with version management.
         
+        Version is determined by checking S3 for existing model folders:
+        - Browses S3 models directory for folders like "XGBClassifier_v1", "XGBClassifier_v2"
+        - Splits folder name by "_" and gets version from last part (e.g., "v1" -> 1)
+        - Creates next version folder locally
+        
         Args:
             model: Trained model (uses self.model if None)
-            model_name: Base name for the model file
+            model_name: Base name for the model. If None, uses model's class name.
             
         Returns:
-            Path to saved model file
+            Tuple of (path to saved model folder, version number)
         """
         logger.info("Saving trained model...")
         
@@ -452,34 +468,37 @@ class ModelTraining:
             if model_to_save is None:
                 raise ValueError("No model to save. Train a model first.")
             
-            # Version management - find next version number
-            existing_models = [f for f in os.listdir(self.config.model_save_dir) 
-                             if f.startswith(model_name) and f.endswith('.joblib') and '_v' in f]
+            # Get model name from model class if not provided
+            if model_name is None:
+                model_name = S3ModelUploader.get_model_class_name(model_to_save)
+            logger.info(f"Model class name: {model_name}")
             
-            if existing_models:
-                versions = []
-                for fname in existing_models:
-                    try:
-                        version_str = fname.replace(model_name + "_v", "").replace(".joblib", "")
-                        versions.append(int(version_str))
-                    except ValueError:
-                        continue
-                next_version = max(versions) + 1 if versions else 1
-            else:
-                next_version = 1
+            # Get next version by checking S3 (OPTIMAL: S3 is source of truth for versioning)
+            logger.info(f"Checking S3 for existing model versions...")
+            next_version = S3ModelUploader.get_next_version_from_s3(
+                s3_uri=PredictionConfig.s3_model_uri,
+                model_name=model_name
+            )
+            logger.info(f"Next version will be: v{next_version}")
             
-            # Save versioned model
-            model_filename = f"{model_name}_v{next_version}.joblib"
-            model_path = os.path.join(self.config.model_save_dir, model_filename)
-            joblib.dump(model_to_save, model_path)
-            logger.info(f"✓ Model saved to: {model_path}")
+            # Create versioned folder: models/XGBClassifier_v1/
+            versioned_folder_name = f"{model_name}_v{next_version}"
+            versioned_folder_path = os.path.join(self.config.model_save_dir, versioned_folder_name)
+            os.makedirs(versioned_folder_path, exist_ok=True)
+            logger.info(f"Created versioned folder: {versioned_folder_path}")
             
-            # Save 'latest' version for DVC tracking
-            latest_path = os.path.join(self.config.model_save_dir, f"{model_name}_latest.joblib")
-            joblib.dump(model_to_save, latest_path)
-            logger.info(f"✓ Latest model: {latest_path}")
+            # Save ONNX model ONLY (no joblib - keeps inference Docker image lightweight)
+            # ONNX is mandatory for this pipeline
+            if not hasattr(model_to_save, "n_features_in_"):
+                raise ValueError("Model does not have n_features_in_ attribute. Cannot determine input shape for ONNX conversion.")
             
-            # Save metadata
+            n_features = model_to_save.n_features_in_
+            onnx_filename = f"{model_name}.onnx"
+            onnx_path = os.path.join(versioned_folder_path, onnx_filename)
+            convert_xgboost_to_onnx(model_to_save, onnx_path, n_features)
+            logger.info(f"✓ ONNX Model saved to: {onnx_path}")
+            
+            # Save metadata in versioned folder
             import yaml
             metadata = {
                 "model_name": model_name,
@@ -487,35 +506,99 @@ class ModelTraining:
                 "run_id": self.run_id,
                 "metrics": self.metrics,
                 "params": self.model_params,
-                "model_path": model_path
+                "created_at": datetime.now().isoformat(),
+                "model_format": "onnx",
+                "model_path": onnx_path
             }
             
-            # Save ONNX model
-            try:
-                if hasattr(model_to_save, "n_features_in_"):
-                    n_features = model_to_save.n_features_in_
-                    onnx_filename = f"{model_name}_v{next_version}.onnx"
-                    onnx_path = os.path.join(self.config.model_save_dir, onnx_filename)
-                    convert_xgboost_to_onnx(model_to_save, onnx_path, n_features)
-                    
-                    # Save latest ONNX symlink
-                    latest_onnx_path = os.path.join(self.config.model_save_dir, f"{model_name}_latest.onnx")
-                    import shutil
-                    shutil.copy2(onnx_path, latest_onnx_path)
-                    logger.info(f"✓ Latest ONNX model: {latest_onnx_path}")
-            except Exception as e:
-                logger.warning(f"Failed to save ONNX model (non-critical): {e}")
-            
-            metadata_path = os.path.join(self.config.model_save_dir, f"{model_name}_v{next_version}_metadata.yaml")
+            metadata_path = os.path.join(versioned_folder_path, "metadata.yaml")
             with open(metadata_path, 'w') as f:
                 yaml.dump(metadata, f, default_flow_style=False)
             logger.info(f"✓ Metadata saved to: {metadata_path}")
             
-            # Cleanup old artifacts (models, metadata, confusion matrices, metrics, onnx)
-            # Keep only the latest version just saved
+            # Save metrics.json in versioned folder
+            metrics_for_dvc = {
+                "train_roc_auc": self.metrics.get("train", {}).get("roc_auc", 0),
+                "train_f1_score": self.metrics.get("train", {}).get("f1_score", 0),
+                "test_roc_auc": self.metrics.get("test", {}).get("roc_auc", 0),
+                "test_f1_score": self.metrics.get("test", {}).get("f1_score", 0),
+            }
+            metrics_path = os.path.join(versioned_folder_path, "metrics.json")
+            with open(metrics_path, 'w') as f:
+                json.dump(metrics_for_dvc, f, indent=2)
+            logger.info(f"✓ Metrics saved to: {metrics_path}")
+            
+            # Copy confusion_matrix.png to versioned folder if it exists
+            cm_src = os.path.join(self.config.model_save_dir, "confusion_matrix.png")
+            if os.path.exists(cm_src):
+                cm_dst = os.path.join(versioned_folder_path, "confusion_matrix.png")
+                shutil.copy2(cm_src, cm_dst)
+                logger.info(f"✓ Confusion matrix copied to: {cm_dst}")
+            
+            # Clean up root-level temp files (keep only in versioned folder)
+            root_metrics = os.path.join(self.config.model_save_dir, "metrics.json")
+            root_cm = os.path.join(self.config.model_save_dir, "confusion_matrix.png")
+            if os.path.exists(root_metrics):
+                os.remove(root_metrics)
+            if os.path.exists(root_cm):
+                os.remove(root_cm)
+            logger.info("✓ Cleaned up root-level temp files (metrics.json, confusion_matrix.png)")
+            
+            # Copy preprocessor to versioned folder (CRITICAL for inference)
+            # First check local models/ folder, then try to fetch from S3
+            preprocessor_src = os.path.join(self.config.model_save_dir, "preprocessor.joblib")
+            if os.path.exists(preprocessor_src):
+                preprocessor_dst = os.path.join(versioned_folder_path, "preprocessor.joblib")
+                shutil.copy2(preprocessor_src, preprocessor_dst)
+                logger.info(f"✓ Preprocessor copied to: {preprocessor_dst}")
+            else:
+                # Try to fetch preprocessor from S3 (from latest version)
+                logger.warning(f"Preprocessor not found locally at {preprocessor_src}, fetching from S3...")
+                try:
+                    import boto3
+                    
+                    s3_uri = PredictionConfig.s3_model_uri
+                    # Parse S3 URI
+                    if s3_uri.startswith('s3://'):
+                        path_parts = s3_uri[5:].split('/', 1)
+                        bucket_name = path_parts[0]
+                        s3_prefix = path_parts[1] if len(path_parts) > 1 else ''
+                    
+                    s3_client = boto3.client('s3')
+                    
+                    # Find latest version in S3 that has preprocessor
+                    paginator = s3_client.get_paginator('list_objects_v2')
+                    versions_with_preprocessor = []
+                    
+                    for page in paginator.paginate(Bucket=bucket_name, Prefix=s3_prefix, Delimiter='/'):
+                        for prefix_info in page.get('CommonPrefixes', []):
+                            folder = prefix_info.get('Prefix', '').rstrip('/').split('/')[-1]
+                            if folder.startswith(model_name + '_v'):
+                                try:
+                                    v = int(folder.split('_v')[-1])
+                                    versions_with_preprocessor.append((v, folder))
+                                except ValueError:
+                                    pass
+                    
+                    if versions_with_preprocessor:
+                        latest_v, latest_folder = max(versions_with_preprocessor, key=lambda x: x[0])
+                        s3_key = f"{s3_prefix}{latest_folder}/preprocessor.joblib"
+                        preprocessor_dst = os.path.join(versioned_folder_path, "preprocessor.joblib")
+                        s3_client.download_file(bucket_name, s3_key, preprocessor_dst)
+                        logger.info(f"✓ Preprocessor fetched from S3: s3://{bucket_name}/{s3_key}")
+                    else:
+                        raise FileNotFoundError("No preprocessor found in S3")
+                        
+                except Exception as s3_err:
+                    raise FileNotFoundError(
+                        f"Preprocessor not found locally at {preprocessor_src} and failed to fetch from S3: {s3_err}. "
+                        "Run feature engineering first (dvc repro data_transformation_Feature_engineering)."
+                    )
+            
+            # Cleanup old versioned folders (keep only current version)
             self.cleanup_old_artifacts(model_name, next_version)
             
-            return model_path
+            return versioned_folder_path, next_version
             
         except Exception as e:
             logger.error(f"Model save failed: {str(e)}")
@@ -523,88 +606,71 @@ class ModelTraining:
 
     def cleanup_old_artifacts(self, model_name: str, current_version: int) -> None:
         """
-        Clean up old model artifacts, keeping only the latest version.
+        Clean up old model versioned folders, keeping only the latest version.
         
-        Since older models are pushed to S3 via DVC, we only keep the latest
+        Since older models are pushed to S3, we only keep the latest
         version locally to save disk space.
         
         Args:
             model_name: Base name for the model (e.g., "XGBClassifier")
             current_version: The version number of the model just saved (to keep)
         """
-        logger.info(f"Cleaning up old artifacts (keeping only v{current_version})...")
+        logger.info(f"Cleaning up old versioned folders (keeping only v{current_version})...")
         
         try:
-            files_deleted = 0
-            files_to_keep = {
-                f"{model_name}_v{current_version}.joblib",
-                f"{model_name}_v{current_version}_metadata.yaml",
-                f"{model_name}_latest.joblib",
-                f"{model_name}_v{current_version}.onnx",
-                f"{model_name}_latest.onnx",
-                "metrics.json",
-                "confusion_matrix.png",
-                ".gitkeep",
-                ".gitignore"
-            }
+            folders_deleted = 0
+            current_folder = f"{model_name}_v{current_version}"
             
+            for item in os.listdir(self.config.model_save_dir):
+                item_path = os.path.join(self.config.model_save_dir, item)
+                
+                # Only process versioned folders
+                if os.path.isdir(item_path) and item.startswith(model_name + '_v'):
+                    # Skip current version folder
+                    if item == current_folder:
+                        continue
+                    
+                    # Extract version number
+                    try:
+                        parts = item.split('_')
+                        version_part = parts[-1]  # 'v1'
+                        if version_part.startswith('v'):
+                            version = int(version_part[1:])
+                            if version < current_version:
+                                # Delete old versioned folder
+                                shutil.rmtree(item_path)
+                                logger.info(f"  Deleted old version folder: {item}")
+                                folders_deleted += 1
+                    except (ValueError, IndexError):
+                        continue
+            
+            # Also clean up any legacy flat files (from old structure)
+            legacy_patterns = [
+                f"{model_name}_v*.joblib",
+                f"{model_name}_v*_metadata.yaml",
+                f"{model_name}_v*.onnx",
+                f"{model_name}_latest.joblib",
+                f"{model_name}_latest.onnx",
+            ]
+            
+            files_deleted = 0
             for filename in os.listdir(self.config.model_save_dir):
                 filepath = os.path.join(self.config.model_save_dir, filename)
                 
-                # Skip directories
+                # Skip directories and keep preprocessor
                 if os.path.isdir(filepath):
                     continue
-                
-                # Skip files we want to keep
-                if filename in files_to_keep:
+                if filename in ['preprocessor.joblib', '.gitkeep', '.gitignore']:
                     continue
                 
-                # Delete old versioned models (e.g., XGBClassifier_v1.joblib, XGBClassifier_v2.joblib)
+                # Delete legacy versioned files (not in folders)
                 if filename.startswith(model_name) and '_v' in filename:
-                    # Extract version number to check if it's an older version
-                    try:
-                        if filename.endswith('.joblib'):
-                            version_str = filename.replace(model_name + "_v", "").replace(".joblib", "")
-                            version = int(version_str)
-                            if version < current_version:
-                                os.remove(filepath)
-                                logger.info(f"  Deleted old model: {filename}")
-                                files_deleted += 1
-                        elif filename.endswith('.onnx'):
-                            version_str = filename.replace(model_name + "_v", "").replace(".onnx", "")
-                            version = int(version_str)
-                            if version < current_version:
-                                os.remove(filepath)
-                                logger.info(f"  Deleted old ONNX model: {filename}")
-                                files_deleted += 1
-                        elif filename.endswith('_metadata.yaml'):
-                            # Extract version from metadata filename
-                            version_str = filename.replace(model_name + "_v", "").replace("_metadata.yaml", "")
-                            version = int(version_str)
-                            if version < current_version:
-                                os.remove(filepath)
-                                logger.info(f"  Deleted old metadata: {filename}")
-                                files_deleted += 1
-                    except ValueError:
-                        # Could not parse version, skip
-                        continue
-                
-                # Delete old confusion matrix files (if any with different naming)
-                elif filename.startswith("confusion_matrix") and filename.endswith(".png"):
-                    if filename != "confusion_matrix.png":
-                        os.remove(filepath)
-                        logger.info(f"  Deleted old confusion matrix: {filename}")
-                        files_deleted += 1
-                
-                # Delete old metrics files (if any with different naming)
-                elif filename.startswith("metrics") and filename.endswith(".json"):
-                    if filename != "metrics.json":
-                        os.remove(filepath)
-                        logger.info(f"  Deleted old metrics file: {filename}")
-                        files_deleted += 1
+                    os.remove(filepath)
+                    logger.info(f"  Deleted legacy file: {filename}")
+                    files_deleted += 1
             
-            if files_deleted > 0:
-                logger.info(f"✓ Cleaned up {files_deleted} old artifact(s)")
+            if folders_deleted > 0 or files_deleted > 0:
+                logger.info(f"✓ Cleaned up {folders_deleted} old folder(s) and {files_deleted} legacy file(s)")
             else:
                 logger.info("✓ No old artifacts to clean up")
                 
@@ -656,34 +722,38 @@ class ModelTraining:
             logger.info("\nStep 5: Training model...")
             model = self.train(X_train, y_train, X_test, y_test)
             
-            # Step 6: Save model locally
-            logger.info("\nStep 6: Saving model locally...")
-            model_path = self.save_model(model)
+            # Get model name dynamically from model class
+            model_name = S3ModelUploader.get_model_class_name(model)
             
-            # Step 7: Upload model to S3
-            logger.info("\nStep 7: Uploading model to S3...")
-            s3_result = S3ModelUploader.upload_latest_model(
+            # Step 6: Save model locally in versioned folder (version from S3)
+            logger.info("\nStep 6: Saving model locally in versioned folder...")
+            versioned_folder_path, version = self.save_model(model)
+            
+            # Step 7: Upload versioned folder to S3
+            logger.info("\nStep 7: Uploading versioned folder to S3...")
+            s3_result = S3ModelUploader.upload_model_to_s3(
                 model_dir=self.config.model_save_dir,
-                model_name="XGBClassifier",
+                model_name=model_name,
+                version=version,
                 s3_uri=PredictionConfig.s3_model_uri,
                 upload_metadata=True,
                 upload_metrics=True
             )
             
             if s3_result['success']:
-                logger.info(f"✓ Model uploaded to S3: {s3_result['s3_paths']}")
+                logger.info(f"✓ Model uploaded to S3: {s3_result['s3_folder']}")
             else:
                 logger.warning(f"⚠ S3 upload failed: {s3_result['error']}")
             
             logger.info("=" * 60)
             logger.info("MODEL TRAINING PIPELINE COMPLETED SUCCESSFULLY!")
-            logger.info(f"Model saved locally to: {model_path}")
-            logger.info(f"Model uploaded to S3: {PredictionConfig.s3_model_uri}")
-            logger.info(f"Metrics saved to: {self.config.model_save_dir}/metrics.json")
+            logger.info(f"Model: {model_name}_v{version}")
+            logger.info(f"Local folder: {versioned_folder_path}")
+            logger.info(f"S3 location: {s3_result.get('s3_folder', 'N/A')}")
             logger.info(f"MLflow run ID: {self.run_id}")
             logger.info("=" * 60)
             
-            return model, model_path
+            return model, versioned_folder_path
             
         except CustomException:
             raise

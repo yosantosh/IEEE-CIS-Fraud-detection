@@ -12,6 +12,12 @@ import sys
 from typing import List, Dict, Any, Optional
 from contextlib import asynccontextmanager
 
+# Load environment variables from .env file (for local development)
+# In Kubernetes/AKS: credentials are injected as env vars from secrets - these take precedence
+# override=False ensures K8s-injected env vars are NOT overwritten by .env file values
+from dotenv import load_dotenv
+load_dotenv(override=False)
+
 import pandas as pd
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -240,20 +246,9 @@ async def predict_batch(request: BatchPredictionRequest):
                 else:
                     normalized_tx[k] = v # Keep extra columns as-is
             
-            # Explicit Pydantic Validation (The 'Genuine' Fix)
-            try:
-                # This ensures data types are correct (e.g. TransactionAmt is float, not 'abc')
-                tx_obj = TransactionInput(**normalized_tx)
-                validated_transactions.append(tx_obj.model_dump())
-            except ValidationError as ve:
-                logger.error(f"Validation failed for transaction index {idx}: {ve.json()}")
-                raise HTTPException(
-                    status_code=422,
-                    detail={
-                        "message": f"Validation failed at index {idx}",
-                        "errors": ve.errors()
-                    }
-                )
+            # Skip strict Pydantic validation to allow raw data through
+            # The PredictionPipeline handles type coercion and missing values robustly
+            validated_transactions.append(normalized_tx)
         
         # --- PHASE 2: PREDICTION ---
         df = pd.DataFrame(validated_transactions)

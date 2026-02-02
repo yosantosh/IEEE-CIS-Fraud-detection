@@ -15,12 +15,14 @@ let predictions = [];
 // ============================================================================
 
 const pasteArea = document.getElementById('paste-area');
+const pasteWrapper = document.getElementById('paste-wrapper');
 const previewSection = document.getElementById('preview-section');
 const previewHeader = document.getElementById('preview-header');
 const previewBody = document.getElementById('preview-body');
 const rowCount = document.getElementById('row-count');
 const predictBtn = document.getElementById('predict-btn');
 const clearBtn = document.getElementById('clear-btn');
+const editBtn = document.getElementById('edit-btn');
 const resultsSection = document.getElementById('results-section');
 const resultsBody = document.getElementById('results-body');
 const loadingOverlay = document.getElementById('loading-overlay');
@@ -119,12 +121,11 @@ function parseTSV(text) {
 }
 
 /**
- * Update preview table with parsed data
+ * Show table preview - hides paste area, shows formatted table
  */
-function updatePreview(data) {
+function showTablePreview(data) {
     if (data.length === 0) {
-        previewSection.style.display = 'none';
-        predictBtn.disabled = true;
+        hideTablePreview();
         return;
     }
 
@@ -151,9 +152,23 @@ function updatePreview(data) {
     // Update count
     rowCount.textContent = `${data.length} rows`;
 
-    // Show preview
+    // IMMEDIATELY hide paste area and show table
+    pasteWrapper.classList.add('hidden');
     previewSection.style.display = 'block';
+    previewSection.classList.add('visible');
+
     predictBtn.disabled = false;
+}
+
+/**
+ * Hide table preview and show paste area
+ */
+function hideTablePreview() {
+    previewSection.classList.remove('visible');
+    previewSection.style.display = 'none';
+    pasteWrapper.classList.remove('hidden');
+
+    predictBtn.disabled = true;
 }
 
 // ============================================================================
@@ -222,9 +237,18 @@ function showLoading(show) {
 function clearInput() {
     pasteArea.value = '';
     parsedData = [];
-    previewSection.style.display = 'none';
+    hideTablePreview();
     resultsSection.style.display = 'none';
-    predictBtn.disabled = true;
+}
+
+function switchToEditMode() {
+    // Hide preview, show paste area with data still there
+    previewSection.classList.remove('visible');
+
+    setTimeout(() => {
+        pasteWrapper.classList.remove('hidden');
+        pasteArea.focus();
+    }, 150);
 }
 
 // ============================================================================
@@ -236,10 +260,10 @@ pasteArea.addEventListener('input', () => {
     const text = pasteArea.value;
     if (text.trim()) {
         parsedData = parseTSV(text);
-        updatePreview(parsedData);
+        showTablePreview(parsedData);
     } else {
         parsedData = [];
-        updatePreview([]);
+        hideTablePreview();
     }
 });
 
@@ -262,6 +286,11 @@ predictBtn.addEventListener('click', async () => {
 
 // Clear button
 clearBtn.addEventListener('click', clearInput);
+
+// Edit button (switch back to edit mode)
+if (editBtn) {
+    editBtn.addEventListener('click', switchToEditMode);
+}
 
 // Download button
 downloadBtn.addEventListener('click', downloadCSV);

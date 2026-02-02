@@ -1,113 +1,175 @@
-# 🎓 The Ultimate Guide to Managing Azure AKS
-> **For**: IEEE-CIS Fraud Detection Project
-> **Goal**: Master your Kubernetes Cluster from the local terminal.
+# 🎓 The Ultimate Master Guide to Azure AKS
+> **Project**: IEEE-CIS Fraud Detection Deployment
+> **Version**: 2.0 (Expert Edition)
+
+This guide provides every command you need to manage, scale, and fix your AKS infrastructure like a pro.
 
 ---
 
-## 🔌 1. Connection (The "Key")
-Before you can do anything, you must connect your local terminal to the cloud cluster.
+## 🏗️ 0. Azure CLI Mastery (Infrastructure)
+Control the "Hardware" level of your cluster.
 
-**Command to Connect:**
+### Connect & Auth
 ```bash
+# Update local config to track the cluster
 az aks get-credentials --resource-group fraud-detection-rg --name fraud-aks-cluster --overwrite-existing
-```
-*   **What it does**: Downloads a "Key file" (kubeconfig) so your `kubectl` command knows how to talk to Azure.
-*   **When to run**: Only once (or if you switch computers).
 
----
+# List available clusters in your subscription
+az aks list -o table
 
-## 🔍 2. Inspection (The "Eyes")
-Use these commands to see what is happening inside.
-
-### Check the Nodes (Servers)
-```bash
-kubectl get nodes
-```
-*   **Expected**: You should see 2 lines (your VM workers) with status `Ready`.
-
-### Check the Pods (Containers)
-```bash
-kubectl get pods
-```
-*   **Expected**: You should see `inference-service-xxxx` running.
-*   **Watch Mode**: `kubectl get pods -w` (Updates live!)
-
-### Check the Services (Load Balancers)
-```bash
-kubectl get services
-```
-*   **Why**: Look for the **EXTERNAL-IP** column for `inference-service`.
-*   **Action**: Copy that IP (e.g., `20.55.11.22`) and paste it in your browser/Postman.
-
----
-
-## 🛠️ 3. Debugging (The "Fix")
-Something crashed? Or getting a 500 error? Use these.
-
-### View Logs (Print Statements)
-See exactly what Python is printing (errors, accessing S3, etc).
-```bash
-# 1. Get the full name first
-kubectl get pods
-
-# 2. View logs
-kubectl logs inference-service-5d6f8-abcde
-```
-*   **Real-time logs**: `kubectl logs -f inference-service-xxxx` (Stream logs like tail -f)
-
-### Describe Pod (Deep Dive)
-If a pod is stuck in `Pending` or `CrashLoopBackOff`, this tells you **why**.
-```bash
-kubectl describe pod inference-service-xxxx
-```
-*   **Look for**: Valid events at the bottom (e.g., "Insufficient CPU", "Failed to pull image").
-
----
-
-## 🕹️ 4. Manual Actions (The "Controls")
-
-### Run the Manual Training Job
-Since we disabled the auto-schedule (Feb 31st), here is how you trigger training manually.
-```bash
-kubectl create job --from=cronjob/training-job manual-training-run-001
-```
-*   *Note*: Change the name (`001`, `002`) each time you run it.
-
-### Scale Up Manually
-Want 10 pods right now?
-```bash
-kubectl scale deployment inference-service --replicas=10
-```
-*(Note: HPA might fight you and try to scale it back down after a minute!)*
-
-### Restart Everything
-If code looks weird or stuck, force a restart (pulls fresh images).
-```bash
-kubectl rollout restart deployment/inference-service
+# Link AKS to your Container Registry (ACR) if images aren't pulling
+az aks update -n fraud-aks-cluster -g fraud-detection-rg --attach-acr mlopsfraud
 ```
 
----
-
-## 🏠 5. Local Testing (The "Port Forward")
-Want to test the cloud API right here on your laptop without using the public IP?
-
+### Power Controls (Save $$$)
 ```bash
-kubectl port-forward svc/inference-service 8000:8000
-```
-*   **Now open**: `http://localhost:8000/docs` in your browser.
-*   **Magic**: It tunnels traffic from your laptop -> Azure Cloud -> Pod securely.
-
----
-
-## 🧹 6. Cleanup (Save Money!)
-Pause the cluster when you sleep so you don't pay for the VMs.
-
-**Stop Cluster (Pause Billing for Compute)**
-```bash
+# Stop the VMs (Best for weekends/sleep)
 az aks stop --name fraud-aks-cluster --resource-group fraud-detection-rg
-```
 
-**Start Cluster (Resume)**
-```bash
+# Start them back up
 az aks start --name fraud-aks-cluster --resource-group fraud-detection-rg
 ```
+
+### Scale the "Servers" (Nodes)
+```bash
+# Manually add more VMs to the pool
+az aks scale --resource-group fraud-detection-rg --cluster-name fraud-aks-cluster --node-count 3
+```
+
+---
+
+## 🔍 1. Advanced Inspection (The "Eyes")
+Go beyond simple `get pods`.
+
+### Enhanced List
+```bash
+# See IPs and Nodes where pods are running
+kubectl get pods -o wide
+
+# Show pod labels (Useful for targeting)
+kubectl get pods --show-labels
+
+# List EVERYTHING in your namespace (Services, Deployments, ReplicaSets, Jobs)
+kubectl get all
+```
+
+### Live Tracking
+```bash
+# Watch pods update in real-time
+watch -n 1 kubectl get pods
+
+# List all Events (The "Newsfeed" of your cluster)
+kubectl get events --sort-by='.lastTimestamp'
+```
+
+---
+
+## 🛠️ 2. Inside the Machine (The "Hands")
+Need to touch the code or move files?
+
+### Shell Into the Container
+```bash
+# Open a bash/sh session inside a running pod
+kubectl exec -it inference-service-xxxx -- /bin/bash
+
+# Run a one-off command without entering
+kubectl exec inference-service-xxxx -- ls /app/models
+```
+
+### Transfer Files
+```bash
+# Copy a file from your Laptop -> Cloud Pod
+kubectl cp tests/sample_data.csv inference-service-xxxx:/app/data.csv
+
+# Download a file from Cloud Pod -> Laptop
+kubectl cp inference-service-xxxx:/app/logs/app.log ./local_debug.log
+```
+
+---
+
+## 📈 3. Performance & Scaling (The "Health")
+Monitor CPU, RAM, and Auto-scaling.
+
+### Resource Usage
+```bash
+# Which pods are eating the most CPU/RAM?
+kubectl top pods
+
+# Which node is under heavy load?
+kubectl top nodes
+```
+
+### HPA (Autoscaling)
+```bash
+# Check the status of your horizontal pod autoscaler
+kubectl get hpa
+
+# Watch HPA scale your pods live during a stress test
+kubectl get hpa -w
+```
+
+---
+
+## 🚨 4. Advanced Debugging (The "Brain")
+When things go wrong.
+
+### The "Explain" Command
+```bash
+# See detailed status and event history (CRITICAL for Pending/Errors)
+kubectl describe pod inference-service-xxxx
+
+# Describe a specific service to check LoadBalancer status
+kubectl describe svc inference-service
+```
+
+### Logs Mastery
+```bash
+# Stream logs from multiple pods at once (matching a label)
+kubectl logs -l app=inference -f --tail=50
+
+# See logs of a pod that already crashed (Previously)
+kubectl logs inference-service-xxxx --previous
+```
+
+---
+
+## ⚡ 5. Productivity Hacks (The "Speed")
+
+### Aliases (Type less!)
+Add these to your `~/.bashrc` or `~/.zshrc`:
+```bash
+alias k='kubectl'
+alias kgp='kubectl get pods'
+alias kgs='kubectl get svc'
+alias kdl='kubectl delete pod'
+alias klogs='kubectl logs -f'
+```
+
+### JSON Path (Filter precisely)
+```bash
+# Get only the External IP of the LoadBalancer
+kubectl get svc inference-service -o jsonpath='{.status.loadBalancer.ingress[0].ip}'
+```
+
+---
+
+## 🌋 6. Common Error Troubleshooting
+| Status | Meaning | Fix |
+| :--- | :--- | :--- |
+| `ImagePullBackOff` | Wrong name/path or No Auth | `az aks update --attach-acr ...` |
+| `Pending` | No space left on Nodes | Scale up nodes with `az aks scale` |
+| `CrashLoopBackOff` | Application code is crashing | Check `kubectl logs --previous` |
+| `OOMKilled` | Pod used too much RAM | Increase `limits.memory` in `inference.yaml` |
+
+---
+
+## 🌍 7. Networking & Port Forwarding
+```bash
+# SECURE TUNNEL: Access the private API as if it were local
+kubectl port-forward svc/inference-service 8080:8000
+
+# Now you can hit http://localhost:8080 without exposing to the internet!
+```
+
+---
+**Tip**: Use `kubectl get pods --all-namespaces` if you accidentally deploy to the wrong place! 🚀

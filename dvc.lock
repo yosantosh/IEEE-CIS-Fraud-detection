@@ -5,12 +5,12 @@ stages:
     deps:
     - path: config/config.py
       hash: md5
-      md5: f8e4f0aaad703b3e511d50df2d3895f5
-      size: 8124
+      md5: ea39dff95d4f087689b722a11ca03c44
+      size: 8122
     - path: config/schema.yaml
       hash: md5
-      md5: 78ba2556dec094b26cd321ab0a3f887b
-      size: 35682
+      md5: f835c415d99c3ff0869378b0f529c99e
+      size: 35376
     - path: src/components/data_ingestion.py
       hash: md5
       md5: 7d83942d938753d094b21f94c4e352a4
@@ -22,63 +22,63 @@ stages:
     outs:
     - path: artifacts/data/raw/raw_data.csv
       hash: md5
-      md5: f861fc031a33c1fd756f722bec449e09
-      size: 11318048
+      md5: d3cf9f95dc7a6259c09173f88fb727ff
+      size: 5700368
   data_transformation_Feature_engineering:
     cmd: python -m src.components.data_FE_transformation
     deps:
     - path: artifacts/data/raw/raw_data.csv
       hash: md5
-      md5: f861fc031a33c1fd756f722bec449e09
-      size: 11318048
+      md5: d3cf9f95dc7a6259c09173f88fb727ff
+      size: 5700368
     - path: config/config.py
       hash: md5
-      md5: f8e4f0aaad703b3e511d50df2d3895f5
-      size: 8124
+      md5: ea39dff95d4f087689b722a11ca03c44
+      size: 8122
     - path: config/schema.yaml
       hash: md5
-      md5: 78ba2556dec094b26cd321ab0a3f887b
-      size: 35682
+      md5: f835c415d99c3ff0869378b0f529c99e
+      size: 35376
     - path: src/components/data_FE_transformation.py
       hash: md5
-      md5: 85806be0f1458f7388e14b489529555d
-      size: 45042
+      md5: 9b36cb90cd493ddb2e7bac0a87fe39f0
+      size: 44802
     outs:
     - path: artifacts/data/transformed/Test_transformed.csv
       hash: md5
-      md5: 0246cf773afa76ad2290c82187e1ac07
-      size: 7404598
+      md5: 5691e84e8a0b198f2f9960be86afc7a3
+      size: 3493921
     - path: artifacts/data/transformed/Train_transformed.csv
       hash: md5
-      md5: 92479808104f26e3d6bd8961b4adc32c
-      size: 29593230
+      md5: f9e0570f550445a65c63f63052c9dec3
+      size: 13982592
   model_training:
     cmd: python -m src.components.model_training_evaluation
     deps:
     - path: artifacts/data/transformed/Test_transformed.csv
       hash: md5
-      md5: 0246cf773afa76ad2290c82187e1ac07
-      size: 7404598
+      md5: 5691e84e8a0b198f2f9960be86afc7a3
+      size: 3493921
     - path: artifacts/data/transformed/Train_transformed.csv
       hash: md5
-      md5: 92479808104f26e3d6bd8961b4adc32c
-      size: 29593230
+      md5: f9e0570f550445a65c63f63052c9dec3
+      size: 13982592
     - path: config/config.py
       hash: md5
-      md5: f8e4f0aaad703b3e511d50df2d3895f5
-      size: 8124
+      md5: ea39dff95d4f087689b722a11ca03c44
+      size: 8122
     - path: config/params.yaml
       hash: md5
-      md5: 86fd55b2e0edb875bd0e3f6df5260f2c
-      size: 679
+      md5: 66844f1a1fa04c9a7afc69bc3981cf32
+      size: 678
     - path: config/schema.yaml
       hash: md5
-      md5: 78ba2556dec094b26cd321ab0a3f887b
-      size: 35682
+      md5: f835c415d99c3ff0869378b0f529c99e
+      size: 35376
     - path: src/components/model_training_evaluation.py
       hash: md5
-      md5: cf0e32e398b85f4a7004706835c8fb26
-      size: 28367
+      md5: 5962fa4217bd794096dcaeed64d51492
+      size: 33633
     params:
       config/params.yaml:
         model_params.XGBClassifier:
@@ -87,7 +87,7 @@ stages:
           tree_method: hist
           device: cuda
           scale_pos_weight: 27
-          max_depth: 10
+          max_depth: 8
           min_child_weight: 5
           learning_rate: 0.02
           n_estimators: 3000
@@ -100,12 +100,3 @@ stages:
           test_size: 0.13
           random_state: 6
           target_column: isFraud
-    outs:
-    - path: models/confusion_matrix.png
-      hash: md5
-      md5: a82db045de0e0c5547bc0930c99a7262
-      size: 34692
-    - path: models/metrics.json
-      hash: md5
-      md5: a069227150b6cebc4c6e60c1ba351938
-      size: 311

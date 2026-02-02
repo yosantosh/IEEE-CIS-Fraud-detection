@@ -97,7 +97,18 @@ jobs:
         uses: azure/login@v1
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
-      
+
+      - name: Check & Start AKS Cluster
+        run: |
+          echo "Checking cluster status..."
+          STATUS=$(az aks show --resource-group ${{ env.RG }} --name ${{ env.CLUSTER }} --query "powerState.code" -o tsv)
+          echo "Current Status: $STATUS"
+          if [ "$STATUS" == "Stopped" ]; then
+            echo "Cluster is stopped. Starting it now..."
+            az aks start --resource-group ${{ env.RG }} --name ${{ env.CLUSTER }}
+            echo "Cluster started."
+          fi
+
       - name: Set AKS Context
         uses: azure/aks-set-context@v3
         with:

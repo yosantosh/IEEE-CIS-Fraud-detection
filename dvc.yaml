@@ -52,12 +52,7 @@ stages:
           - model_training
     # NOTE: Models are now uploaded directly to S3 via custom function (not DVC)
     # The S3ModelUploader in src/utils handles upload to s3://mlops-capstone-project-final/models/
-    metrics:
-      - models/metrics.json:
-          cache: false
-    plots:
-      - models/confusion_matrix.png:
-          cache: false
+    # Metrics and confusion matrix are saved inside versioned folders (e.g., XGBClassifier_v1/)
 
   # --------------------------------------------------------
   # Stage 5: Model Evaluation (placeholder)

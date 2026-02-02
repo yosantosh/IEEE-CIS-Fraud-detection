@@ -1653,15 +1653,6 @@ preprocessed_train:
   pca78: float64
   pca79: float64
   pca80: float64
-  pca81: float64
-  pca82: float64
-  pca83: float64
-  pca84: float64
-  pca85: float64
-  pca86: float64
-  pca87: float64
-  pca88: float64
-  pca89: float64
   isFraud: int64
 preprocessed_test:
   TransactionID: float64
@@ -2010,13 +2001,4 @@ preprocessed_test:
   pca78: float64
   pca79: float64
   pca80: float64
-  pca81: float64
-  pca82: float64
-  pca83: float64
-  pca84: float64
-  pca85: float64
-  pca86: float64
-  pca87: float64
-  pca88: float64
-  pca89: float64
   isFraud: int64

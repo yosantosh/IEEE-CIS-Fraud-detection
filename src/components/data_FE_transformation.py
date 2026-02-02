@@ -119,11 +119,12 @@ class Data_FE_Transformation:
 
         # Time of day buckets
         # 0 = night, 1 = morning, 2 = afternoon, 3 = evening
+        # Convert Categorical to float before fillna (Categorical doesn't allow new categories)
         df['Transaction_time_of_day'] = pd.cut(
             df['Transaction_hour'],
             bins=self.config.time_of_day_bins,
             labels=self.config.time_of_day_labels
-        ).fillna(-1).astype(int)
+        ).astype(float).fillna(-1).astype(int)
 
         # -------------------------
         # Binary behavior flags

@@ -81,21 +81,74 @@ class PredictionPipeline(Data_FE_Transformation):
     
     
     
-    def _fetch_preprocessor(self, s3_client, bucket_name, s3_prefix):
-        """Helper to fetch preprocessor."""
+    def _fetch_preprocessor(self, s3_client, bucket_name, s3_versioned_prefix):
+        """Helper to fetch preprocessor from versioned folder."""
         try:
             filename = "preprocessor.joblib"
-            s3_key = f"{s3_prefix}{filename}"
+            s3_key = f"{s3_versioned_prefix}{filename}"
             local_path = os.path.join(self.prediction_config.local_model_dir, filename)
             
             logger.info(f"Downloading preprocessor: s3://{bucket_name}/{s3_key}")
             s3_client.download_file(bucket_name, s3_key, local_path)
-            logger.info(f"✓ Preprocessor downloaded: {local_path}")
+            logger.info(f"\u2713 Preprocessor downloaded: {local_path}")
         except Exception as e:
             logger.warning(f"Could not fetch preprocessor from S3: {e}")
 
+    def _get_latest_version_from_s3(self, s3_client, bucket_name, s3_prefix, model_name) -> Optional[int]:
+        """
+        Find the latest model version by checking existing folders in S3.
+        
+        Browses S3 models directory for folders like "XGBClassifier_v1", "XGBClassifier_v2"
+        and returns the latest version number.
+        
+        Args:
+            s3_client: Boto3 S3 client
+            bucket_name: S3 bucket name
+            s3_prefix: Prefix path in bucket (e.g., 'models/')
+            model_name: Base model name (e.g., 'XGBClassifier')
+            
+        Returns:
+            int or None: Latest version number, or None if no versions found
+        """
+        try:
+            paginator = s3_client.get_paginator('list_objects_v2')
+            versions = []
+            
+            for page in paginator.paginate(Bucket=bucket_name, Prefix=s3_prefix, Delimiter='/'):
+                common_prefixes = page.get('CommonPrefixes', [])
+                
+                for prefix_info in common_prefixes:
+                    prefix = prefix_info.get('Prefix', '')
+                    # Extract folder name (e.g., 'models/XGBClassifier_v1/' -> 'XGBClassifier_v1')
+                    folder_name = prefix.rstrip('/').split('/')[-1]
+                    
+                    # Check if this folder matches our model name pattern
+                    if folder_name.startswith(model_name + '_v'):
+                        try:
+                            # Split by '_' and get version from last part
+                            parts = folder_name.split('_')
+                            version_part = parts[-1]  # 'v1'
+                            if version_part.startswith('v'):
+                                version_num = int(version_part[1:])
+                                versions.append(version_num)
+                                logger.info(f"  Found model version in S3: {folder_name} (v{version_num})")
+                        except (ValueError, IndexError):
+                            continue
+            
+            if versions:
+                latest = max(versions)
+                logger.info(f"\u2713 Latest S3 version found: v{latest}")
+                return latest
+            else:
+                logger.warning("No versioned folders found in S3")
+                return None
+                
+        except Exception as e:
+            logger.error(f"Error finding latest version in S3: {e}")
+            return None
+
     def _fetch_preprocessor_standalone(self):
-        """Fetch preprocessor from S3 independently (when needed during preprocessing)."""
+        """Fetch preprocessor from S3 independently (from latest versioned folder)."""
         try:
             # Parse S3 URI
             s3_path = self.prediction_config.s3_model_uri[5:]  # Remove 's3://'
@@ -119,14 +172,19 @@ class PredictionPipeline(Data_FE_Transformation):
             # Create local directory if needed
             os.makedirs(self.prediction_config.local_model_dir, exist_ok=True)
             
-            # Fetch preprocessor
-            filename = "preprocessor.joblib"
-            s3_key = f"{s3_prefix}{filename}"
-            local_path = os.path.join(self.prediction_config.local_model_dir, filename)
+            # Get latest version from S3
+            model_name = self.prediction_config.model_name
+            latest_version = self._get_latest_version_from_s3(s3_client, bucket_name, s3_prefix, model_name)
             
-            logger.info(f"Downloading preprocessor: s3://{bucket_name}/{s3_key}")
-            s3_client.download_file(bucket_name, s3_key, local_path)
-            logger.info(f"✓ Preprocessor downloaded: {local_path}")
+            if latest_version is None:
+                raise Exception(f"No versioned model folders found in s3://{bucket_name}/{s3_prefix}")
+            
+            # Build versioned folder path
+            versioned_folder = f"{model_name}_v{latest_version}"
+            s3_versioned_prefix = f"{s3_prefix}{versioned_folder}/"
+            
+            # Fetch preprocessor from versioned folder
+            self._fetch_preprocessor(s3_client, bucket_name, s3_versioned_prefix)
             
         except Exception as e:
             logger.error(f"Failed to fetch preprocessor from S3: {e}")
@@ -134,7 +192,15 @@ class PredictionPipeline(Data_FE_Transformation):
 
     def fetch_model_from_s3(self) -> str:
         """
-        Fetch the latest model AND preprocessor from S3.
+        Fetch the latest model AND preprocessor from S3 versioned folder.
+        
+        New folder structure:
+            s3://bucket/models/XGBClassifier_v1/
+                - XGBClassifier.joblib
+                - XGBClassifier.onnx
+                - preprocessor.joblib
+                - metadata.yaml
+                - metrics.json
         
         Returns:
             str: Local path to downloaded model
@@ -167,98 +233,109 @@ class PredictionPipeline(Data_FE_Transformation):
             # Create local directory if needed
             os.makedirs(self.prediction_config.local_model_dir, exist_ok=True)
             
-            # Determine filename based on version
+            model_name = self.prediction_config.model_name
+            
+            # Determine which version to fetch
             if self.prediction_config.model_version == "latest":
-                # Find the latest version dynamically by listing S3 objects
+                # Find latest version by browsing S3 folders
                 logger.info(f"Finding latest model version in s3://{bucket_name}/{s3_prefix}...")
+                latest_version = self._get_latest_version_from_s3(s3_client, bucket_name, s3_prefix, model_name)
                 
-                response = s3_client.list_objects_v2(Bucket=bucket_name, Prefix=s3_prefix)
+                if latest_version is None:
+                    # Fallback: check for legacy flat file structure
+                    logger.warning("No versioned folders found, trying legacy flat structure...")
+                    return self._fetch_model_legacy(s3_client, bucket_name, s3_prefix)
                 
-                if 'Contents' not in response:
-                    raise Exception(f"No models found in s3://{bucket_name}/{s3_prefix}")
-                
-                # Find highest version number from files like XGBClassifier_v9.onnx
-                import re
-                model_name = self.prediction_config.model_name
-                version_pattern = re.compile(rf'{model_name}_v(\d+)\.(onnx|joblib)$')
-                
-                versions_found = {}
-                for obj in response['Contents']:
-                    key = obj['Key']
-                    filename = key.split('/')[-1]
-                    match = version_pattern.match(filename)
-                    if match:
-                        version = int(match.group(1))
-                        ext = match.group(2)
-                        if version not in versions_found:
-                            versions_found[version] = {}
-                        versions_found[version][ext] = key
-                
-                if not versions_found:
-                    # Fallback to _latest files if no versioned files found
-                    logger.warning("No versioned models found, trying _latest files...")
-                    onnx_filename = f"{model_name}_latest.onnx"
-                    joblib_filename = f"{model_name}_latest.joblib"
-                else:
-                    # Get highest version
-                    latest_version = max(versions_found.keys())
-                    logger.info(f"✓ Found latest version: v{latest_version}")
-                    
-                    # Prefer ONNX over joblib
-                    if 'onnx' in versions_found[latest_version]:
-                        onnx_filename = f"{model_name}_v{latest_version}.onnx"
-                        joblib_filename = f"{model_name}_v{latest_version}.joblib"
-                    else:
-                        onnx_filename = None
-                        joblib_filename = f"{model_name}_v{latest_version}.joblib"
+                version = latest_version
             else:
-                v = self.prediction_config.model_version.replace('v', '')
-                joblib_filename = f"{self.prediction_config.model_name}_v{v}.joblib"
-                onnx_filename = f"{self.prediction_config.model_name}_v{v}.onnx"
+                # Specific version requested (e.g., 'v3' or '3')
+                version = int(self.prediction_config.model_version.replace('v', ''))
             
-            # Build S3 keys and local paths
-            s3_key_onnx = f"{s3_prefix}{onnx_filename}" if onnx_filename else None
-            s3_key_joblib = f"{s3_prefix}{joblib_filename}"
+            # Build versioned folder path
+            versioned_folder = f"{model_name}_v{version}"
+            s3_versioned_prefix = f"{s3_prefix}{versioned_folder}/"
+            logger.info(f"Fetching from versioned folder: s3://{bucket_name}/{s3_versioned_prefix}")
             
-            local_path_onnx = os.path.join(self.prediction_config.local_model_dir, onnx_filename) if onnx_filename else None
-            local_path_joblib = os.path.join(self.prediction_config.local_model_dir, joblib_filename)
+            # ONNX ONLY - no joblib (keeps inference Docker image lightweight)
+            onnx_filename = f"{model_name}.onnx"
+            local_path_onnx = os.path.join(self.prediction_config.local_model_dir, f"{model_name}_v{version}.onnx")
             
-            # Attempt to fetch ONNX model FIRST
-            if s3_key_onnx:
-                try:
-                    logger.info(f"Downloading ONNX model: s3://{bucket_name}/{s3_key_onnx}")
-                    s3_client.download_file(bucket_name, s3_key_onnx, local_path_onnx)
-                    logger.info(f"✓ ONNX Model downloaded: {local_path_onnx}")
-                    
-                    # Also fetch preprocessor
-                    self._fetch_preprocessor(s3_client, bucket_name, s3_prefix)
-                    return local_path_onnx
-                except Exception as e_onnx:
-                    logger.warning(f"Could not download ONNX model: {e_onnx}. Falling back to joblib...")
+            # Fetch ONNX model
+            s3_key_onnx = f"{s3_versioned_prefix}{onnx_filename}"
+            logger.info(f"Downloading ONNX model: s3://{bucket_name}/{s3_key_onnx}")
+            s3_client.download_file(bucket_name, s3_key_onnx, local_path_onnx)
+            logger.info(f"✓ ONNX Model downloaded: {local_path_onnx}")
             
-            # Fallback to joblib
-            logger.info(f"Downloading Joblib model: s3://{bucket_name}/{s3_key_joblib}")
-            s3_client.download_file(bucket_name, s3_key_joblib, local_path_joblib)
-            logger.info(f"✓ Model downloaded: {local_path_joblib}")
+            # Fetch preprocessor
+            self._fetch_preprocessor(s3_client, bucket_name, s3_versioned_prefix)
             
-            # Attempt to fetch preprocessor
-            self._fetch_preprocessor(s3_client, bucket_name, s3_prefix)
-            
-            return local_path_joblib
+            return local_path_onnx
             
         except Exception as e:
             logger.error(f"Failed to fetch model from S3: {str(e)}")
             raise CustomException(e, sys)
     
+    def _fetch_model_legacy(self, s3_client, bucket_name, s3_prefix) -> str:
+        """
+        Legacy fallback: fetch ONNX model from flat file structure (for backward compatibility).
+        
+        Old structure: s3://bucket/models/XGBClassifier_v1.onnx (flat files)
+        ONNX ONLY - no joblib support for lightweight inference.
+        """
+        logger.info("Using legacy flat file fetch (ONNX only)...")
+        
+        model_name = self.prediction_config.model_name
+        
+        # List objects to find latest ONNX version
+        response = s3_client.list_objects_v2(Bucket=bucket_name, Prefix=s3_prefix)
+        
+        if 'Contents' not in response:
+            raise Exception(f"No models found in s3://{bucket_name}/{s3_prefix}")
+        
+        import re
+        # Only look for ONNX files
+        version_pattern = re.compile(rf'{model_name}_v(\d+)\.onnx$')
+        
+        versions_found = []
+        for obj in response['Contents']:
+            key = obj['Key']
+            filename = key.split('/')[-1]
+            match = version_pattern.match(filename)
+            if match:
+                versions_found.append(int(match.group(1)))
+        
+        if not versions_found:
+            # Try _latest.onnx file
+            onnx_filename = f"{model_name}_latest.onnx"
+        else:
+            latest_version = max(versions_found)
+            logger.info(f"✓ Found latest version: v{latest_version}")
+            onnx_filename = f"{model_name}_v{latest_version}.onnx"
+        
+        s3_key_onnx = f"{s3_prefix}{onnx_filename}"
+        local_path_onnx = os.path.join(self.prediction_config.local_model_dir, onnx_filename)
+        
+        # Fetch ONNX model
+        logger.info(f"Downloading ONNX model: s3://{bucket_name}/{s3_key_onnx}")
+        s3_client.download_file(bucket_name, s3_key_onnx, local_path_onnx)
+        logger.info(f"✓ ONNX Model downloaded: {local_path_onnx}")
+        
+        # Fetch preprocessor (legacy location)
+        self._fetch_preprocessor(s3_client, bucket_name, s3_prefix)
+        
+        return local_path_onnx
+    
     def load_model(self, model_path: Optional[str] = None):
         """
-        Load model from local path or fetch from S3 if not available.
+        Load ONNX model from local path or fetch from S3 if not available.
+        
+        ONNX ONLY - no joblib support for lightweight inference.
         
         Args:
-            model_path: Optional local path to model. If None, fetches from S3.
+            model_path: Optional local path to ONNX model. If None, fetches from S3.
             
         Returns:
-            Loaded model object
+            Loaded ONNX model session
             
         Raises:
             CustomException: If model loading fails
@@ -267,89 +344,61 @@ class PredictionPipeline(Data_FE_Transformation):
             if model_path is None:
                 local_path = None
                 
-                # Find latest model in local directory
+                # Find latest ONNX model in local directory
                 if self.prediction_config.model_version == "latest":
                     import re
                     model_name = self.prediction_config.model_name
                     local_dir = self.prediction_config.local_model_dir
                     
                     if os.path.exists(local_dir):
-                        version_pattern = re.compile(rf'{model_name}_v(\d+)\.(onnx|joblib)$')
-                        versions_found = {}
+                        # Only look for ONNX files
+                        version_pattern = re.compile(rf'{model_name}_v(\d+)\.onnx$')
+                        versions_found = []
                         
                         for filename in os.listdir(local_dir):
                             match = version_pattern.match(filename)
                             if match:
-                                version = int(match.group(1))
-                                ext = match.group(2)
-                                if version not in versions_found:
-                                    versions_found[version] = {}
-                                versions_found[version][ext] = filename
+                                versions_found.append((int(match.group(1)), filename))
                         
                         if versions_found:
-                            latest_version = max(versions_found.keys())
-                            logger.info(f"Found local model version: v{latest_version}")
-                            
-                            # Prefer ONNX over joblib
-                            if 'onnx' in versions_found[latest_version]:
-                                local_path = os.path.join(local_dir, versions_found[latest_version]['onnx'])
-                            elif 'joblib' in versions_found[latest_version]:
-                                local_path = os.path.join(local_dir, versions_found[latest_version]['joblib'])
+                            latest_version, latest_filename = max(versions_found, key=lambda x: x[0])
+                            logger.info(f"Found local ONNX model version: v{latest_version}")
+                            local_path = os.path.join(local_dir, latest_filename)
                 else:
                     # Specific version requested
                     v = self.prediction_config.model_version.replace('v', '')
-                    base_name = f"{self.prediction_config.model_name}_v{v}"
-                    
-                    local_connx = os.path.join(self.prediction_config.local_model_dir, f"{base_name}.onnx")
-                    local_cjoblib = os.path.join(self.prediction_config.local_model_dir, f"{base_name}.joblib")
-                    
-                    if os.path.exists(local_connx):
-                        local_path = local_connx
-                    elif os.path.exists(local_cjoblib):
-                        local_path = local_cjoblib
+                    local_onnx = os.path.join(
+                        self.prediction_config.local_model_dir, 
+                        f"{self.prediction_config.model_name}_v{v}.onnx"
+                    )
+                    if os.path.exists(local_onnx):
+                        local_path = local_onnx
                 
                 if local_path is None or not os.path.exists(local_path):
-                    logger.info(f"Model not found locally, fetching from S3...")
+                    logger.info(f"ONNX model not found locally, fetching from S3...")
                     local_path = self.fetch_model_from_s3()
             else:
                 local_path = model_path
             
-            logger.info(f"Loading model from {local_path}...")
+            # Ensure we're loading an ONNX model
+            if not local_path.endswith('.onnx'):
+                raise ValueError(f"Expected ONNX model (.onnx), got: {local_path}")
             
-            if local_path.endswith('.onnx'):
-                try:
-                    import onnxruntime as ort
-                    self.model = ort.InferenceSession(local_path)
-                    self.is_onnx = True
-                    logger.info(f"✓ ONNX Model loaded successfully")
-                except ImportError:
-                    logger.error("onnxruntime not installed. Cannot load ONNX model.")
-                    raise
-            else:
-                # Try to load joblib, but fallback to ONNX from S3 if xgboost not installed
-                try:
-                    self.model = joblib.load(local_path)
-                    self.is_onnx = False
-                    logger.info(f"✓ Joblib Model loaded successfully: {type(self.model).__name__}")
-                except ModuleNotFoundError as e:
-                    if 'xgboost' in str(e):
-                        logger.warning(f"xgboost not installed - fetching ONNX model from S3 instead...")
-                        # Delete the cached joblib file and fetch ONNX from S3
-                        if os.path.exists(local_path):
-                            os.remove(local_path)
-                        local_path = self.fetch_model_from_s3()
-                        
-                        import onnxruntime as ort
-                        self.model = ort.InferenceSession(local_path)
-                        self.is_onnx = True
-                        logger.info(f"✓ ONNX Model loaded successfully (fallback)")
-                    else:
-                        raise
+            logger.info(f"Loading ONNX model from {local_path}...")
+            
+            try:
+                import onnxruntime as ort
+                self.model = ort.InferenceSession(local_path)
+                self.is_onnx = True
+                logger.info(f"✓ ONNX Model loaded successfully")
+            except ImportError:
+                logger.error("onnxruntime not installed. Cannot load ONNX model.")
+                raise
             
             return self.model
             
         except Exception as e:
-            logger.error(f"Failed to load model: {str(e)}")
+            logger.error(f"Failed to load ONNX model: {str(e)}")
             raise CustomException(e, sys)
     
     # ========================================================================
@@ -462,6 +511,24 @@ class PredictionPipeline(Data_FE_Transformation):
             
             # Step 2: Transaction Amount Features (inherited)
             logger.info("Step 2: Creating transaction amount features...")
+            
+            # CRITICAL FIX: Ensure TransactionAmt and TransactionDT are numeric
+            # The API allows raw string data (e.g. "100.50"), so we MUST coerce here.
+            if 'TransactionAmt' in df.columns:
+                df['TransactionAmt'] = pd.to_numeric(df['TransactionAmt'], errors='coerce')
+                
+            if 'TransactionDT' in df.columns:
+                df['TransactionDT'] = pd.to_numeric(df['TransactionDT'], errors='coerce')
+
+            # Ensure C and D columns are numeric (often used in feature engineering)
+            for i in range(1, 16):
+                c_col = f'C{i}'
+                d_col = f'D{i}'
+                if c_col in df.columns:
+                     df[c_col] = pd.to_numeric(df[c_col], errors='coerce')
+                if d_col in df.columns:
+                     df[d_col] = pd.to_numeric(df[d_col], errors='coerce')
+
             df = self.create_transaction_amount_features(df)
             
             # Step 3: Time Features (inherited)
