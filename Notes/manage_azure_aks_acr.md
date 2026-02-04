@@ -162,6 +162,17 @@ az aks nodepool add \
 kubectl rollout restart deployment/inference-service
 ```
 
+### Apply Configuration Changes (YAML Updates)
+*Use this when you modify a YAML file (e.g., adding environment variables, changing ports, or updating labels for monitoring).*
+```bash
+# Apply changes from a specific file
+kubectl apply -f kubernetes/aks/inference.yaml
+```
+**Why use this?**
+- **Updates Live State**: Syncs your running cluster resources with your local configuration files.
+- **Enables Monitoring**: Crucial when you add metadata (like `app: inference` labels or named ports) that tools like Prometheus need to discover your service.
+
+
 ### Manual Image Update
 *If you pushed a new image to ACR manually and want K8s to use it immediately.*
 ```bash
@@ -250,3 +261,31 @@ kubectl create job --from=cronjob/training-job manual-training-001
 kubectl get pods
 kubectl logs manual-training-001-xxxxx -f
 ```
+
+---
+
+## 🔄 11. Full Redeployment Workflow (Code Update)
+*Follow these steps when you change code (e.g., adding metrics) and need to update the running service.*
+
+### Step 1: Login to ACR
+```bash
+az acr login --name mlopsfraud
+```
+
+### Step 2: Build & Push New Image
+*Rebuild the Docker image with your latest changes.*
+```bash
+# Build (replace 'latest' with a version tag for production)
+docker build -f docker/inference.Dockerfile -t mlopsfraud.azurecr.io/fraud-inference:latest .
+
+# Push to Azure Container Registry
+docker push mlopsfraud.azurecr.io/fraud-inference:latest
+```
+
+### Step 3: Update Cluster
+*Apply the YAML configuration to restart pods with the new image.*
+```bash
+# This updates the Deployment spec and triggers a rolling restart
+kubectl apply -f kubernetes/aks/inference.yaml
+```
+*Note: If you used `latest` tag and `imagePullPolicy: Always` is set, pods will pull the new image on restart.*

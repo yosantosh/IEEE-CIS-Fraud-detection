@@ -16,7 +16,191 @@ from contextlib import asynccontextmanager
 # In Kubernetes/AKS: credentials are injected as env vars from secrets - these take precedence
 # override=False ensures K8s-injected env vars are NOT overwritten by .env file values
 from dotenv import load_dotenv
+from dotenv import load_dotenv
 load_dotenv(override=False)
+
+# ============================================================================
+# PROMETHEUS METRICS SETUP
+# ============================================================================
+from prometheus_client import (
+    Counter, Histogram, Gauge,
+    generate_latest, CONTENT_TYPE_LATEST, REGISTRY
+)
+from starlette.responses import Response
+from starlette.requests import Request
+import time
+
+# ----------------------------------------------------------------------------
+# LAYER 2: SERVICE METRICS (API Performance)
+# ----------------------------------------------------------------------------
+
+REQUEST_COUNT = Counter(
+    'inference_requests_total',
+    'Total number of inference requests',
+    ['method', 'endpoint', 'status']
+)
+
+REQUEST_LATENCY = Histogram(
+    'inference_request_duration_seconds',
+    'Request latency in seconds',
+    ['method', 'endpoint'],
+    buckets=[0.1, 0.25, 0.5, 1.0, 2.0, 5.0, 10.0]
+)
+
+ERROR_COUNT = Counter(
+    'inference_errors_total',
+    'Total number of inference errors',
+    ['error_type']
+)
+
+# ----------------------------------------------------------------------------
+# LAYER 3: MODEL METRICS (Fraud Detection Specific)
+# ----------------------------------------------------------------------------
+
+PREDICTIONS = Counter(
+    'model_predictions_total',
+    'Total predictions by result',
+    ['result']  # 'fraud' or 'legitimate'
+)
+
+FRAUD_RATE = Gauge(
+    'fraud_rate_percent',
+    'Current fraud rate percentage (Label Drift indicator)'
+)
+
+CONFIDENCE_SCORE = Gauge(
+    'model_confidence_score',
+    'Average model confidence score'
+)
+
+MODEL_LOADED = Gauge(
+    'model_loaded',
+    'Whether model is loaded (1=yes, 0=no)'
+)
+
+BATCH_SIZE = Histogram(
+    'inference_batch_size',
+    'Distribution of batch sizes',
+    buckets=[1, 5, 10, 25, 50, 100, 250, 500, 1000]
+)
+
+# ============================================================================
+# DRIFT DETECTION FOR FRAUD MODEL
+# ============================================================================
+from scipy import stats
+import numpy as np
+from collections import deque
+
+# Drift metrics
+PREDICTION_DRIFT_SCORE = Gauge(
+    'model_prediction_drift_score',
+    'Prediction distribution drift (KS-test statistic)'
+)
+
+LABEL_DRIFT_SCORE = Gauge(
+    'model_label_drift_score', 
+    'Label drift from baseline fraud rate'
+)
+
+class FraudDriftDetector:
+    """
+    Simplified drift detection for fraud detection.
+    Focuses on Prediction Drift and Label Drift.
+    """
+    
+    def __init__(self, baseline_fraud_rate: float = 0.035, window_size: int = 1000):
+        """
+        Args:
+            baseline_fraud_rate: Expected fraud rate from training data (3.5%)
+            window_size: Number of recent predictions to analyze
+        """
+        self.baseline_fraud_rate = baseline_fraud_rate
+        self.window_size = window_size
+        
+        # Sliding window of fraud probabilities
+        self.prediction_window = deque(maxlen=window_size)
+        
+        # Reference distribution (from training)
+        # Normal distribution centered around low fraud probability
+        # In a real scenario, this should be loaded from the training artifact
+        self.reference_distribution = np.random.beta(1, 28, size=1000)  # ~3.5% mean
+    
+    def add_prediction(self, fraud_probability: float):
+        """Add a new prediction to the window."""
+        self.prediction_window.append(fraud_probability)
+    
+    def add_predictions_batch(self, fraud_probabilities: list):
+        """Add batch of predictions."""
+        for prob in fraud_probabilities:
+            self.prediction_window.append(prob)
+    
+    def calculate_prediction_drift(self) -> float:
+        """
+        Calculate prediction drift using KS-test.
+        Compares current prediction distribution to reference.
+        
+        Returns:
+            KS statistic (0-1, higher = more drift)
+        """
+        if len(self.prediction_window) < 100:
+            return 0.0  # Not enough data
+        
+        current_predictions = np.array(self.prediction_window)
+        
+        # KS-test: compare distributions
+        ks_statistic, p_value = stats.ks_2samp(
+            self.reference_distribution,
+            current_predictions
+        )
+        
+        # Update Prometheus metric
+        PREDICTION_DRIFT_SCORE.set(ks_statistic)
+        
+        return ks_statistic
+    
+    def calculate_label_drift(self) -> float:
+        """
+        Calculate label drift (change in fraud rate).
+        
+        Returns:
+            Absolute difference from baseline
+        """
+        if len(self.prediction_window) < 100:
+            return 0.0
+        
+        current_predictions = np.array(self.prediction_window)
+        
+        # Current fraud rate (predictions > 0.5 are fraud)
+        current_fraud_rate = (current_predictions > 0.5).mean()
+        
+        # Drift = absolute difference from baseline
+        label_drift = abs(current_fraud_rate - self.baseline_fraud_rate)
+        
+        # Update Prometheus metric
+        LABEL_DRIFT_SCORE.set(label_drift)
+        
+        return label_drift
+    
+    def check_drift(self) -> dict:
+        """
+        Run all drift checks and return results.
+        
+        Returns:
+            Dictionary with drift scores and alerts
+        """
+        pred_drift = self.calculate_prediction_drift()
+        label_drift = self.calculate_label_drift()
+        
+        return {
+            'prediction_drift': pred_drift,
+            'prediction_drift_alert': pred_drift > 0.3,
+            'label_drift': label_drift,
+            'label_drift_alert': label_drift > 0.05,  # 5% deviation
+            'samples_in_window': len(self.prediction_window)
+        }
+
+# Global instance (initialize at startup)
+drift_detector = FraudDriftDetector(baseline_fraud_rate=0.035)
 
 import pandas as pd
 from fastapi import FastAPI, HTTPException
@@ -163,10 +347,12 @@ async def lifespan(app: FastAPI):
         logger.info("Loading model from S3...")
         prediction_pipeline.load_model()
         logger.info("✓ Model loaded successfully!")
+        MODEL_LOADED.set(1)
         
     except Exception as e:
         logger.error(f"Failed to load model at startup: {str(e)}")
         logger.warning("API will start without model - /predict will fail until model is available")
+        MODEL_LOADED.set(0)
     
     yield
     
@@ -181,6 +367,45 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan
 )
+
+# ============================================================================
+# METRICS ENDPOINT & MIDDLEWARE
+# ============================================================================
+
+@app.get("/metrics")
+async def metrics():
+    """Prometheus metrics endpoint - Prometheus scrapes this."""
+    return Response(
+        content=generate_latest(REGISTRY),
+        media_type=CONTENT_TYPE_LATEST
+    )
+
+@app.middleware("http")
+async def metrics_middleware(request: Request, call_next):
+    """Automatically track latency and count for all requests."""
+    start_time = time.time()
+    
+    response = await call_next(request)
+    
+    # Skip metrics for /metrics and /health endpoints to avoid noise
+    if request.url.path in ["/metrics", "/health", "/favicon.ico"]:
+        return response
+        
+    process_time = time.time() - start_time
+    
+    # Record metrics
+    REQUEST_COUNT.labels(
+        method=request.method,
+        endpoint=request.url.path,
+        status=response.status_code
+    ).inc()
+    
+    REQUEST_LATENCY.labels(
+        method=request.method,
+        endpoint=request.url.path
+    ).observe(process_time)
+    
+    return response
 
 # Add CORS middleware
 app.add_middleware(
@@ -247,6 +472,9 @@ async def predict_batch(request: BatchPredictionRequest):
     try:
         logger.info(f"Received batch prediction request with {len(request.transactions)} transactions")
         
+        # Track batch size
+        BATCH_SIZE.observe(len(request.transactions))
+        
         # --- PHASE 1: SMART MAPPING & VALIDATION ---
         validated_transactions = []
         reference_keys = TransactionInput.model_fields.keys()
@@ -284,21 +512,58 @@ async def predict_batch(request: BatchPredictionRequest):
             logger.warning("TransactionID missing or null, generating sequential IDs.")
             df['TransactionID'] = range(1, len(df) + 1)
         
-        # Run prediction pipeline
-        result_df = prediction_pipeline.predict(df)
+        # Run prediction pipeline (use predict_proba to get scores)
+        result_df = prediction_pipeline.predict_proba(df)
         
         # Convert to response format
-        predictions = [
-            PredictionResult(
-                TransactionID=int(row['TransactionID']),
-                isFraud=int(row['prediction_isFraud'])
+        predictions = []
+        confidences = []
+        drift_values = []
+        
+        for _, row in result_df.iterrows():
+            is_fraud = int(row['prediction_isFraud'])
+            prob = float(row['fraud_probability'])
+            
+            # Confidence is probability of the predicted class
+            confidence = prob if is_fraud == 1 else (1.0 - prob)
+            
+            predictions.append(
+                PredictionResult(
+                    TransactionID=int(row['TransactionID']),
+                    isFraud=is_fraud
+                )
             )
-            for _, row in result_df.iterrows()
-        ]
+            confidences.append(confidence)
+            drift_values.append(prob)
         
         fraud_count = sum(1 for p in predictions if p.isFraud == 1)
         fraud_rate = (fraud_count / len(predictions) * 100) if predictions else 0
         
+        # UPDATE METRICS
+        legit_count = len(predictions) - fraud_count
+        PREDICTIONS.labels(result='fraud').inc(fraud_count)
+        PREDICTIONS.labels(result='legitimate').inc(legit_count)
+        FRAUD_RATE.set(fraud_rate)
+        
+        if confidences:
+            avg_confidence = sum(confidences) / len(confidences)
+            CONFIDENCE_SCORE.set(avg_confidence)
+        
+        # Update rolling window for drift detection (using probabilities)
+        # Add to drift detector
+        drift_detector.add_predictions_batch(drift_values)
+        
+        # Periodically check drift (every 100 predictions)
+        if len(drift_detector.prediction_window) % 100 == 0:
+            drift_results = drift_detector.check_drift()
+            if drift_results['prediction_drift_alert']:
+                logger.warning(f"⚠️ Prediction drift detected: {drift_results['prediction_drift']:.3f} (KS Test)")
+            if drift_results['label_drift_alert']:
+                logger.warning(f"⚠️ Label drift detected: {drift_results['label_drift']:.3f} (Fraud Rate Deviation)")
+            
+            # Log drift metrics for debugging
+            logger.info(f"Drift Check - Pred Drift: {drift_results['prediction_drift']:.3f}, Label Drift: {drift_results['label_drift']:.3f}")
+
         logger.info(f"✓ Batch prediction complete: {len(predictions)} transactions, {fraud_count} fraud")
         
         return BatchPredictionResponse(
@@ -311,6 +576,7 @@ async def predict_batch(request: BatchPredictionRequest):
     except HTTPException:
         raise # Re-raise validation errors
     except Exception as e:
+        ERROR_COUNT.labels(error_type=type(e).__name__).inc()
         logger.error(f"Prediction failed: {str(e)}")
         raise HTTPException(
             status_code=500,

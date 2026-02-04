@@ -1,0 +1,19 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: inference-service-monitor
+  namespace: monitoring
+  labels:
+    release: prometheus  # IMPORTANT: Must match Prometheus Helm release
+spec:
+  selector:
+    matchLabels:
+      app: inference  # Must match your inference service labels
+  namespaceSelector:
+    matchNames:
+      - default  # Namespace where inference runs
+  endpoints:
+    - port: http        # Port name from your Service
+      path: /metrics    # Metrics endpoint
+      interval: 15s     # Scrape every 15 seconds
+      scrapeTimeout: 10s

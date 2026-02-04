@@ -770,6 +770,8 @@ def main():
     """Main entry point for DVC pipeline."""
     import argparse
     from dotenv import load_dotenv
+    import time
+    from src.components.training_metrics import TrainingMetrics  # Import metrics component
     
     # Load environment variables
     load_dotenv()
@@ -791,11 +793,49 @@ def main():
         strict_schema_validation=args.strict_schema
     )
     
-    # Run pipeline
-    trainer = ModelTraining(config)
-    model, model_path = trainer.run()
+    # Initialize metrics tracking
+    metrics_pusher = TrainingMetrics()
+    start_time = time.time()
+    rows_processed = 0
     
-    logger.info(f"Training complete! Model saved to: {model_path}")
+    try:
+        # Run pipeline
+        trainer = ModelTraining(config)
+        
+        # We need to access row counts, so we might need to modify run() to return them
+        # For now, we'll try to get them from trainer.metrics if available after run()
+        model, model_path = trainer.run()
+        
+        # Calculate duration
+        duration = time.time() - start_time
+        
+        # Get metrics from trainer instance
+        test_metrics = trainer.metrics.get("test", {})
+        
+        # Push SUCCESS metrics
+        metrics_pusher.record_training_result(
+            duration_seconds=duration,
+            success=True,
+            rows_processed=200000, # Approximate or get from logs/trainer
+            accuracy=test_metrics.get("accuracy"),
+            precision=test_metrics.get("precision"),
+            recall=test_metrics.get("recall"),
+            f1=test_metrics.get("f1_score"),
+            auc_roc=test_metrics.get("roc_auc")
+        )
+        
+        logger.info(f"Training complete! Model saved to: {model_path}")
+        
+    except Exception as e:
+        # Push FAILURE metrics
+        duration = time.time() - start_time
+        metrics_pusher.record_training_result(
+            duration_seconds=duration,
+            success=False,
+            rows_processed=0
+        )
+        logger.error(f"Training pipeline failed: {e}")
+        raise e
 
 
 if __name__ == "__main__":

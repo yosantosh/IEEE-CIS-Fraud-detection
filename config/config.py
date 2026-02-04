@@ -49,7 +49,7 @@ class DataIngestionConfig:
     schema_yaml_path: str = "config/schema.yaml"
     
     # Row limit for reading data (float for percentage, int for rows, None for all)
-    nrows: Optional[float] = float(os.getenv("DATA_INGESTION_NROWS", 0.14))  # Default 10% to prevent OOM
+    nrows: Optional[float] = float(os.getenv("DATA_INGESTION_NROWS", 0.15))  # Default 10% to prevent OOM
     
     # S3 settings (from environment variables)
     bucket_name: str = os.getenv("S3_BUCKET_NAME", "mlops-capstone-project-final")

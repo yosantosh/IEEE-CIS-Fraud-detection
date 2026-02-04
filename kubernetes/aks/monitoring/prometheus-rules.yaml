@@ -1,0 +1,124 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: fraud-detection-alerts
+  namespace: monitoring
+  labels:
+    release: prometheus
+spec:
+  groups:
+    # =========================================
+    # LAYER 1: INFRASTRUCTURE ALERTS
+    # =========================================
+    - name: infrastructure
+      rules:
+        - alert: HighCPUUsage
+          expr: |
+            (100 - (avg by(instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100)) > 80
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "High CPU usage detected"
+            description: "CPU usage is above 80% for 5+ minutes"
+
+        - alert: HighMemoryUsage
+          expr: |
+            (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100 > 85
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "High memory usage detected"
+            description: "Memory usage is above 85%"
+
+        - alert: DiskSpaceLow
+          expr: |
+            (node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"}) * 100 < 10
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Disk space critically low"
+
+    # =========================================
+    # LAYER 2: API SERVICE ALERTS
+    # =========================================
+    - name: api-service
+      rules:
+        - alert: HighLatency
+          expr: |
+            histogram_quantile(0.99, sum(rate(inference_request_duration_seconds_bucket[5m])) by (le)) > 2
+          for: 2m
+          labels:
+            severity: warning
+          annotations:
+            summary: "High API latency (p99 > 2s)"
+
+        - alert: HighErrorRate
+          expr: |
+            sum(rate(inference_errors_total[5m])) / sum(rate(inference_requests_total[5m])) > 0.05
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Error rate above 5%"
+
+        - alert: ServiceDown
+          expr: up{job="inference-service"} == 0
+          for: 1m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Inference service is DOWN"
+
+    # =========================================
+    # LAYER 3: MODEL QUALITY ALERTS (Fraud-Specific)
+    # =========================================
+    - name: model-quality
+      rules:
+        # LABEL DRIFT: Fraud rate changed significantly
+        - alert: AbnormalFraudRate
+          expr: |
+            abs(fraud_rate_percent - 3.5) > 5
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "⚠️ Label Drift: Fraud rate abnormal"
+            description: "Fraud rate deviated more than 5% from baseline (3.5%)"
+            action: "Check for new fraud patterns or data issues"
+
+        # CONFIDENCE DRIFT: Model becoming uncertain
+        - alert: LowModelConfidence
+          expr: |
+            avg(model_confidence_score) < 0.7
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "⚠️ Confidence Drift: Model uncertain"
+            description: "Average confidence dropped below 70%"
+            action: "Model may need retraining"
+
+        # TRAINING FAILURE
+        - alert: TrainingJobFailed
+          expr: |
+            training_status == 0
+          for: 1m
+          labels:
+            severity: critical
+          annotations:
+            summary: "🚨 Training job failed"
+            description: "The most recent training job failed"
+
+        # MODEL PERFORMANCE DEGRADED
+        - alert: ModelPerformanceDegraded
+          expr: |
+            model_auc_roc < 0.85
+          for: 1m
+          labels:
+            severity: warning
+          annotations:
+            summary: "⚠️ Model AUC-ROC below 0.85"
+            description: "Model performance has degraded"

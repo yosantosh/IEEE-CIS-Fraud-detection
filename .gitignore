@@ -256,3 +256,30 @@ docker-data/
 
 # Notebooks checkpoints
 .ipynb_checkpoints/
+
+# ================================================
+# Kubernetes & Azure Credentials (NEVER commit)
+# ================================================
+
+# Kubeconfig files (if copied to project)
+kubeconfig
+kubeconfig.yaml
+.kube/
+*.kubeconfig
+
+# Azure credentials
+.azure/
+azure.json
+servicePrincipal.json
+
+# Kubernetes secrets (if exported)
+*-secret.yaml
+*-secrets.yaml
+secrets/
+
+# Helm values with secrets
+values-secret.yaml
+values-prod.yaml
+*-values-secret.yaml
+# Markdown files
+*.md
