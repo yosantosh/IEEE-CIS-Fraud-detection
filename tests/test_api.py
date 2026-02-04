@@ -44,13 +44,14 @@ def test_predict_batch_success():
     # Mock result DataFrame
     mock_result_df = pd.DataFrame({
         "TransactionID": [1001, 1002],
-        "prediction_isFraud": [0, 1]
+        "prediction_isFraud": [0, 1],
+        "fraud_probability": [0.1, 0.9]  # Added for new logic
     })
     
     # Create mock pipeline
     mock_pipeline = MagicMock()
     mock_pipeline.model = "loaded"
-    mock_pipeline.predict.return_value = mock_result_df
+    mock_pipeline.predict_proba.return_value = mock_result_df  # Changed from predict to predict_proba
     
     with patch('src.api.main.prediction_pipeline', mock_pipeline):
         response = client.post("/predict", json=mock_input)

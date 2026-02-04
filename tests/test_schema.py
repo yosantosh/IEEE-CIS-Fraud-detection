@@ -21,9 +21,11 @@ def test_predict_smart_mapping(mock_pipeline):
     """Verifies that case-insensitive matching and missing cols return 200."""
     mock_pipeline.model = MagicMock()
     import pandas as pd
-    mock_pipeline.predict.return_value = pd.DataFrame({
+    import pandas as pd
+    mock_pipeline.predict_proba.return_value = pd.DataFrame({
         'TransactionID': [123],
-        'prediction_isFraud': [0]
+        'prediction_isFraud': [0],
+        'fraud_probability': [0.05]
     })
     
     # Smart input: lowercase keys, missing 90% of columns
