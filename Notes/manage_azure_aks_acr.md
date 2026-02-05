@@ -11,6 +11,12 @@ This guide covers everything you need to connect, control, scale, and troublesho
 az login
 ```
 
+### Start, stopped AKS cluster
+
+```bash
+az aks start --resource-group fraud-detection-rg --name fraud-aks-cluster
+```
+
 ### Connect to AKS Cluster (Get `kubectl` access)
 *Run this if `kubectl` says "no such host" or connection refused.*
 ```bash
@@ -289,3 +295,13 @@ docker push mlopsfraud.azurecr.io/fraud-inference:latest
 kubectl apply -f kubernetes/aks/inference.yaml
 ```
 *Note: If you used `latest` tag and `imagePullPolicy: Always` is set, pods will pull the new image on restart.*
+
+
+
+
+# Manage name spaces 
+
+```bash
+
+
+```

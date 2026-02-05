@@ -28,6 +28,8 @@ const resultsBody = document.getElementById('results-body');
 const loadingOverlay = document.getElementById('loading-overlay');
 const apiStatus = document.getElementById('api-status');
 const downloadBtn = document.getElementById('download-btn');
+const fileInput = document.getElementById('file-upload');
+const uploadBtn = document.getElementById('upload-btn');
 
 // Stats elements
 const totalCount = document.getElementById('total-count');
@@ -88,36 +90,184 @@ async function predictBatch(transactions) {
 // ============================================================================
 
 /**
- * Parse tab-separated values from Excel/Sheets paste
+ * Parse delimited text (auto-detect delimiter: tab, comma, semicolon, pipe)
  */
-function parseTSV(text) {
-    const lines = text.trim().split('\n');
+function parseDelimitedText(text) {
+    const lines = text.trim().split(/\r?\n/);
     if (lines.length < 2) return [];
 
+    // Auto-detect delimiter by checking first line
+    const firstLine = lines[0];
+    let delimiter = '\t'; // Default to tab
+
+    // Count occurrences of common delimiters
+    const delimiters = ['\t', ',', ';', '|'];
+    let maxCount = 0;
+
+    for (const d of delimiters) {
+        const count = (firstLine.match(new RegExp(d === '|' ? '\\|' : d, 'g')) || []).length;
+        if (count > maxCount) {
+            maxCount = count;
+            delimiter = d;
+        }
+    }
+
+    // If no delimiter found, try space
+    if (maxCount === 0) {
+        delimiter = /\s+/;
+    }
+
     // Parse header
-    const headers = lines[0].split('\t').map(h => h.trim());
+    const headers = typeof delimiter === 'string'
+        ? firstLine.split(delimiter).map(h => h.trim().replace(/^["']|["']$/g, ''))
+        : firstLine.split(delimiter).map(h => h.trim().replace(/^["']|["']$/g, ''));
+
+    if (headers.length < 2) return [];
 
     // Parse data rows
     const data = [];
     for (let i = 1; i < lines.length; i++) {
-        const values = lines[i].split('\t');
-        if (values.length < 2) continue; // Skip empty or incomplete rows
+        const line = lines[i].trim();
+        if (!line) continue; // Skip empty lines
+
+        const values = typeof delimiter === 'string'
+            ? line.split(delimiter)
+            : line.split(delimiter);
+
+        if (values.length < 2) continue; // Skip incomplete rows
 
         const row = {};
         headers.forEach((header, index) => {
-            let value = values[index]?.trim() || '';
+            let value = (values[index] || '').trim().replace(/^["']|["']$/g, '');
 
             // Try to parse as number
-            if (value !== '' && !isNaN(value)) {
-                value = parseFloat(value);
+            if (value !== '' && !isNaN(value) && value !== '') {
+                const num = parseFloat(value);
+                value = isNaN(num) ? value : num;
             }
 
             row[header] = value;
         });
-        data.push(row);
+
+        // Only add row if it has at least some data
+        if (Object.values(row).some(v => v !== '' && v !== null && v !== undefined)) {
+            data.push(row);
+        }
     }
 
     return data;
+}
+
+/**
+ * Handle file selection
+ */
+async function handleFileSelect(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    showLoading(true);
+
+    try {
+        const data = await parseFile(file);
+        if (!data || data.length === 0) {
+            throw new Error('No data found in file');
+        }
+        parsedData = data;
+        showTablePreview(parsedData);
+    } catch (error) {
+        alert('File parsing failed: ' + error.message);
+        console.error(error);
+    } finally {
+        showLoading(false);
+        // Reset input so same file can be selected again
+        event.target.value = '';
+    }
+}
+
+/**
+ * Parse uploaded file
+ */
+function parseFile(file) {
+    return new Promise((resolve, reject) => {
+        const extension = file.name.split('.').pop().toLowerCase();
+
+        if (extension === 'json') {
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                try {
+                    const json = JSON.parse(e.target.result);
+                    // Ensure it's an array
+                    const result = Array.isArray(json) ? json : [json];
+                    resolve(result);
+                } catch (err) {
+                    reject(new Error('Invalid JSON file'));
+                }
+            };
+            reader.onerror = () => reject(new Error('Error reading file'));
+            reader.readAsText(file);
+        }
+        else if (extension === 'csv') {
+            if (typeof Papa === 'undefined') {
+                reject(new Error('CSV parser not loaded'));
+                return;
+            }
+            Papa.parse(file, {
+                header: true,
+                dynamicTyping: true,
+                skipEmptyLines: true,
+                complete: (results) => {
+                    if (results.errors.length > 0 && !results.data.length) {
+                        reject(new Error('CSV parsing error'));
+                    } else {
+                        resolve(results.data);
+                    }
+                },
+                error: (err) => reject(new Error('CSV parsing error: ' + err.message))
+            });
+        }
+        else if (['xlsx', 'xls'].includes(extension)) {
+            if (typeof XLSX === 'undefined') {
+                reject(new Error('Excel parser not loaded'));
+                return;
+            }
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                try {
+                    const data = new Uint8Array(e.target.result);
+                    const workbook = XLSX.read(data, { type: 'array' });
+                    const firstSheetName = workbook.SheetNames[0];
+                    const worksheet = workbook.Sheets[firstSheetName];
+                    const json = XLSX.utils.sheet_to_json(worksheet);
+                    resolve(json);
+                } catch (err) {
+                    reject(new Error('Excel parsing error: ' + err.message));
+                }
+            };
+            reader.onerror = () => reject(new Error('Error reading file'));
+            reader.readAsArrayBuffer(file);
+        }
+        else if (['tsv', 'txt'].includes(extension)) {
+            // Handle TSV and TXT files using our delimiter parser
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                try {
+                    const data = parseDelimitedText(e.target.result);
+                    if (data.length === 0) {
+                        reject(new Error('No valid data found in file'));
+                    } else {
+                        resolve(data);
+                    }
+                } catch (err) {
+                    reject(new Error('Text file parsing error: ' + err.message));
+                }
+            };
+            reader.onerror = () => reject(new Error('Error reading file'));
+            reader.readAsText(file);
+        }
+        else {
+            reject(new Error('Unsupported file format. Please use CSV, TSV, TXT, Excel, or JSON.'));
+        }
+    });
 }
 
 /**
@@ -130,22 +280,19 @@ function showTablePreview(data) {
     }
 
     const headers = Object.keys(data[0]);
-    const displayHeaders = headers.slice(0, 8); // Show first 8 columns only
 
-    // Update header
+    // Update header - show ALL columns (scrollable)
     previewHeader.innerHTML = `
         <tr>
-            ${displayHeaders.map(h => `<th>${h}</th>`).join('')}
-            ${headers.length > 8 ? '<th>...</th>' : ''}
+            ${headers.map(h => `<th>${h}</th>`).join('')}
         </tr>
     `;
 
-    // Update body (show first 5 rows)
-    const displayData = data.slice(0, 5);
+    // Update body (show first 10 rows for better preview)
+    const displayData = data.slice(0, 10);
     previewBody.innerHTML = displayData.map(row => `
         <tr>
-            ${displayHeaders.map(h => `<td>${row[h] ?? ''}</td>`).join('')}
-            ${headers.length > 8 ? '<td>...</td>' : ''}
+            ${headers.map(h => `<td>${row[h] ?? ''}</td>`).join('')}
         </tr>
     `).join('');
 
@@ -259,8 +406,13 @@ function switchToEditMode() {
 pasteArea.addEventListener('input', () => {
     const text = pasteArea.value;
     if (text.trim()) {
-        parsedData = parseTSV(text);
-        showTablePreview(parsedData);
+        parsedData = parseDelimitedText(text);
+        if (parsedData.length > 0) {
+            showTablePreview(parsedData);
+        } else {
+            // If parsing failed, show an error
+            console.warn('Could not parse pasted data. Ensure it has headers and at least one data row.');
+        }
     } else {
         parsedData = [];
         hideTablePreview();
@@ -294,6 +446,12 @@ if (editBtn) {
 
 // Download button
 downloadBtn.addEventListener('click', downloadCSV);
+
+// File Upload
+if (uploadBtn && fileInput) {
+    uploadBtn.addEventListener('click', () => fileInput.click());
+    fileInput.addEventListener('change', handleFileSelect);
+}
 
 // ============================================================================
 // INITIALIZATION
