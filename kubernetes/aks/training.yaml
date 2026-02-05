@@ -29,6 +29,9 @@ spec:
               valueFrom: {secretKeyRef: {name: app-secrets, key: DAGSHUB_TOKEN}}
             - name: MLFLOW_TRACKING_PASSWORD
               valueFrom: {secretKeyRef: {name: app-secrets, key: DAGSHUB_TOKEN}}
+            # Testing OOM crash for alerting - set to 0.5 (50% of data)
+            - name: DATA_INGESTION_NROWS
+              value: "0.5"
             resources:
               requests:
                 cpu: "500m"
